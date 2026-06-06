@@ -1,9 +1,10 @@
 # vcsr — a high-performance CSR compiler for V
 
-> **Status: implementation in progress (TDD).** Phases 01–02 are **implemented
-> and passing** — the `.html` parser ([`ast/`](ast), [`parser/`](parser)) and slot
-> extraction ([`slots/`](slots)). Phases 03–10 remain spec-first: their `tests/`
-> files describe the behavior each phase must satisfy before the code lands.
+> **Status: implementation in progress (TDD).** Phases 01–03 are **implemented
+> and passing** — the `.html` parser ([`ast/`](ast), [`parser/`](parser)), slot
+> extraction ([`slots/`](slots)), and reactive binding ([`bind/`](bind)). Phases
+> 04–10 remain spec-first: their `tests/` files describe the behavior each phase
+> must satisfy before the code lands.
 
 `vcsr` compiles V UI components into a **fully client-side rendered (CSR)**
 bundle that paints and updates entirely in the browser — no server round-trip to
@@ -187,7 +188,7 @@ phase is "done" when its file's assertions hold against the implementation.
 |---|---|---|
 | 01 ✅ | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | parse a `.html` template file → AST (interpolation, events, directives) — **implemented** ([ast/](ast), [parser/](parser)) |
 | 02 ✅ | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table — **implemented** ([slots/](slots)) |
-| 03 | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings |
+| 03 ✅ | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings — **implemented** ([bind/](bind)) |
 | 04 | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) |
 | 05 | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope + atomize + tree-shake |
 | 06 | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan |
