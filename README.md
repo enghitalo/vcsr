@@ -1,10 +1,9 @@
 # vcsr — a high-performance CSR compiler for V
 
-> **Status: design + spec-first tests.** This repository currently contains the
-> specification (this README) and a **phased, test-driven roadmap** (the
-> `tests/` folder). The compiler is not implemented yet — the tests describe the
-> behavior each phase must satisfy. They are intentionally written before the
-> code (TDD); you are not expected to run them yet.
+> **Status: implementation in progress (TDD).** Phase 01 (the `.html` template
+> parser) is **implemented and passing** — see [`ast/`](ast) + [`parser/`](parser)
+> and run its tests (below). Phases 02–10 remain spec-first: their `tests/` files
+> describe the behavior each phase must satisfy before the code lands.
 
 `vcsr` compiles V UI components into a **fully client-side rendered (CSR)**
 bundle that paints and updates entirely in the browser — no server round-trip to
@@ -186,7 +185,7 @@ phase is "done" when its file's assertions hold against the implementation.
 
 | Phase | File | Goal |
 |---|---|---|
-| 01 | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | parse a `.html` template file → AST (interpolation, events, directives) |
+| 01 ✅ | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | parse a `.html` template file → AST (interpolation, events, directives) — **implemented** ([ast/](ast), [parser/](parser)) |
 | 02 | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table |
 | 03 | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings |
 | 04 | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) |
@@ -197,7 +196,20 @@ phase is "done" when its file's assertions hold against the implementation.
 | 09 | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + vanilla response building |
 | 10 | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle |
 
-Run (once implemented): `v test tests/`.
+### Building & testing
+
+The library modules (`ast`, `parser`) are plain V under the `vcsr` module name.
+To resolve `import vcsr.parser` / `import vcsr.ast`, put the repo on V's module
+path (clone it as `vcsr/`, or symlink it), then run the implemented phase:
+
+```sh
+ln -s "$PWD" ~/.vmodules/vcsr            # make `import vcsr.*` resolve
+v test tests/phase_01_template_parser_test.v   # phase 01 — passes
+```
+
+Phases 02–10 import not-yet-built modules (`vcsr.slots`, …), so `v test tests/`
+as a whole won't pass until those land — run the implemented phase file(s)
+individually.
 
 ## Non-goals
 
