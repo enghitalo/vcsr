@@ -1,0 +1,171 @@
+# vcsr — a high-performance CSR compiler for V
+
+> **Status: design + spec-first tests.** This repository currently contains the
+> specification (this README) and a **phased, test-driven roadmap** (the
+> `tests/` folder). The compiler is not implemented yet — the tests describe the
+> behavior each phase must satisfy. They are intentionally written before the
+> code (TDD); you are not expected to run them yet.
+
+`vcsr` compiles V UI components into a **fully client-side rendered (CSR)**
+bundle that paints and updates entirely in the browser — no server round-trip to
+mutate the DOM — and that is designed to be **served by
+[vanilla](https://github.com/enghitalo/vanilla)**, the high-performance V HTTP
+server.
+
+It rests on two design ideas (summarized in [docs/DESIGN.md](docs/DESIGN.md)):
+
+- **A minimal `js` FFI substrate** — the irreducible host-call layer the compiler
+  targets at the bottom: hold a host reference and `get`/`set`/`call`/`new` on it
+  (the WASM equivalent of "JS can touch the DOM"). Everything else — DOM
+  bindings, reactivity, components — is a library on top.
+- **An embedded-HTML, clone-and-patch rendering model** — templates are compiled
+  to a static HTML skeleton (embedded in the WASM data segment) plus a slot
+  table, registered once as a native `<template>`, cloned per instance, and
+  patched surgically by fine-grained signals (no Virtual DOM).
+
+## Why pair a CSR compiler with vanilla?
+
+`vanilla` is a lock-free, copy-free, `SO_REUSEPORT`, epoll/io_uring server. A CSR
+bundle is the *ideal* payload for it: a handful of **static, content-hashed,
+precompressed** files (`index.html`, `app.js`, `*.wasm`, `app.css`). There is no
+per-request server rendering — the server's job is to ship immutable bytes as
+fast as the kernel allows (ETag, `sendfile`, brotli), which is exactly what
+vanilla is built for. `vcsr` emits those bytes **plus a manifest** vanilla reads
+to answer every request with correct `Content-Type`, `Content-Encoding`,
+`Cache-Control`, and SPA-fallback behavior.
+
+> Serving a CSR/WASM bundle needs a few things vanilla's `static_files` example
+> doesn't cover yet (notably `application/wasm`, precompressed-asset negotiation,
+> immutable caching, and SPA fallback). Those are written up as a concrete
+> proposal in [docs/ISSUE-vanilla-static-assets.md](docs/ISSUE-vanilla-static-assets.md)
+> to file upstream.
+
+## The performance thesis (what makes it fast)
+
+| Decision | Why it's the fast path |
+|---|---|
+| **Embedded HTML in the WASM data segment** | the browser's native parser builds each subtree in one call; no `createElement`-per-node FFI |
+| **`<template>` registered once + `cloneNode`** | per-instance render is a native clone, not N boundary crossings |
+| **Fine-grained signals, no Virtual DOM** | a write updates only the exact slot nodes that read it — O(dependents), no diff |
+| **`externref` DOM handles** | DOM nodes cross the boundary as host handles, never serialized through linear memory |
+| **Core + per-route chunks over shared memory** | first load = core + landing route only; routes arrive just-in-time |
+| **Static, hashed, brotli'd output** | vanilla serves immutable bytes with `sendfile`/ETag; nothing is rendered per request |
+
+See [docs/DESIGN.md](docs/DESIGN.md) for the rendering mechanism and the
+shared-memory code-splitting that keeps first load small.
+
+## Compiler pipeline
+
+```
+  .v components (+ $vui templates, $css styles)
+        │
+        ▼
+ ┌──────────────────────────────────────────────────────────────┐
+ │ 1 parse      markup → AST                          (phase 01)  │
+ │ 2 slots      AST → static HTML skeleton + slot table (phase 02)│
+ │ 3 bind       slots → reactive binding code         (phase 03)  │
+ │ 4 component  props/typing/composition/hoisting     (phase 04)  │
+ │ 5 css        scope + atomize + tree-shake          (phase 05)  │
+ │ 6 router     route table → chunk plan (core/lazy)  (phase 06)  │
+ │ 7 wasm       core MAIN + side modules, shared mem  (phase 07)  │
+ │ 8 bundle     dist/ + hashing + brotli + sourcemaps (phase 08)  │
+ │ 9 manifest   asset table for vanilla (mime/cache)  (phase 09)  │
+ │10 optimize   wasm-opt, prefetch hints, e2e         (phase 10)  │
+ └──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+  dist/  ──────────────▶  served by vanilla (static + manifest)
+```
+
+## Output layout (`dist/`)
+
+```
+dist/
+├── index.html              empty <body>; loads app.js (the WASM builds the UI)
+├── app.[hash].js           tiny loader: streaming-instantiate + router + dynamic linker
+├── core.[hash].wasm        runtime + reactive + dom + router + shared components + landing route
+├── route-<name>.[hash].wasm one per lazy route; imports core's memory/table
+├── app.[hash].css          scoped + atomized stylesheet
+├── *.br / *.gz             precompressed siblings of each text/wasm asset
+├── *.map                   source maps back to .v
+└── manifest.json           asset → { hash, content_type, encoding, cache, route? }
+```
+
+Every asset except `index.html` is content-hashed and immutable; `index.html`
+is tiny and `no-cache`, so deploys flip atomically by swapping it.
+
+## CLI (planned)
+
+```sh
+vcsr build  ./src --out dist --release   # full production bundle
+vcsr watch  ./src                        # dev server (HMR, source maps)
+vcsr check  ./src                        # type/template diagnostics only
+vcsr serve  dist                         # reference vanilla server over the bundle
+```
+
+## Serving it with vanilla
+
+`vcsr build` emits `dist/manifest.json`. A vanilla request handler reads it once
+at boot and answers each request with the right headers — the response building
+is pure logic (testable without a socket, exactly like vanilla's own
+`static_files` tests):
+
+```v
+import http_server
+import vcsr.serve { AssetServer }
+
+// load the manifest produced by `vcsr build`
+mut assets := AssetServer.load('dist/manifest.json')!
+
+fn handle_request(req []u8, fd int) ![]u8 {
+	// AssetServer resolves path → asset, negotiates Accept-Encoding (br/gzip),
+	// sets application/wasm + immutable Cache-Control, and falls back to
+	// index.html for client-side routes. Returns raw HTTP bytes for vanilla.
+	return assets.respond(req)
+}
+```
+
+What `AssetServer` guarantees (and what the phase-09 tests pin down):
+
+- `*.wasm` → `Content-Type: application/wasm` (**required** for
+  `WebAssembly.instantiateStreaming`).
+- `Accept-Encoding: br` / `gzip` → serve the precompressed sibling with
+  `Content-Encoding` + `Vary: Accept-Encoding`.
+- hashed assets → `Cache-Control: public, max-age=31536000, immutable`;
+  `index.html` → `Cache-Control: no-cache`.
+- unknown, non-asset path (a client route like `/users/42`) → serve
+  `index.html` so deep links and refreshes work (SPA fallback).
+- ETag / `If-None-Match` and `Range` reuse vanilla's existing support.
+
+The upstream gaps this relies on are proposed in
+[docs/ISSUE-vanilla-static-assets.md](docs/ISSUE-vanilla-static-assets.md).
+
+## Development roadmap & tests
+
+Development is split into ten phases; each has a spec file under `tests/`. A
+phase is "done" when its file's assertions hold against the implementation.
+
+| Phase | File | Goal |
+|---|---|---|
+| 01 | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | markup → AST (interpolation, events, directives) |
+| 02 | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table |
+| 03 | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings |
+| 04 | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | components, typed props, composition, hoisting |
+| 05 | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | scope + atomize + tree-shake CSS |
+| 06 | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan |
+| 07 | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory |
+| 08 | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps |
+| 09 | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + vanilla response building |
+| 10 | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle |
+
+Run (once implemented): `v test tests/`.
+
+## Non-goals
+
+- **SSR / hydration** — that's a complementary, separate direction. `vcsr` is
+  CSR-first (optionally prerender the landing route only).
+- **Being a server** — that's `vanilla`. `vcsr` emits bytes; vanilla serves them.
+
+## License
+
+MIT (concept).
