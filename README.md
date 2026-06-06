@@ -41,7 +41,9 @@ counter/
 
 vcsr pairs them, resolves the template's references against the struct, and
 generates `counter.gen.v` (plain V implementing `view()`/`style()`). See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and
+[docs/COMPONENTS.md](docs/COMPONENTS.md) for the component model — PascalCase
+references, props/events, and the inline-vs-boundary composition strategy.
 
 ## Why pair a CSR compiler with vanilla?
 
