@@ -211,6 +211,17 @@ Phases 02–10 import not-yet-built modules (`vcsr.slots`, …), so `v test test
 as a whole won't pass until those land — run the implemented phase file(s)
 individually.
 
+## Contributing & engineering guidelines
+
+vcsr is V code; a compiler is a hot loop over bytes. Two guides codify how to
+keep it fast, correct, and free of V-compiler dependencies:
+
+- [docs/BEST_PRACTICES.md](docs/BEST_PRACTICES.md) — passes as pure functions,
+  emit plain V (no `$`-builtins), zero-copy over the source, deterministic
+  output, injection-safe codegen, per-phase testing.
+- [docs/V_PERF_TOOLBOX.md](docs/V_PERF_TOOLBOX.md) — reading emitted C, V
+  attributes, array flags, allocation facts, and codegen string building.
+
 ## Non-goals
 
 - **SSR / hydration** — that's a complementary, separate direction. `vcsr` is
