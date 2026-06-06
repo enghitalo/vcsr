@@ -1,0 +1,4 @@
+dist/
+*.wasm
+*.br
+*.gz
