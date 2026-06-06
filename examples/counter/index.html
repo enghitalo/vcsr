@@ -1,0 +1,17 @@
+<!doctype html>
+<!--
+  Empty shell. The <body> ships empty: the WASM builds the entire UI client-side.
+  `vcsr build` emits the production version of this into dist/ with the hashed
+  asset names wired in (e.g. app.[hash].js, app.[hash].css).
+-->
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vcsr · counter</title>
+    <link rel="stylesheet" href="/app.css" />
+    <link rel="preload" href="/core.wasm" as="fetch" crossorigin />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body><!-- the WASM builds the UI here --></body>
+</html>

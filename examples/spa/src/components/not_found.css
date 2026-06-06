@@ -1,0 +1,9 @@
+.notfound {
+  display: grid;
+  gap: 0.5rem;
+  padding: 3rem 2rem;
+  text-align: center;
+}
+.muted {
+  color: var(--fg-muted);
+}

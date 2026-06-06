@@ -1,0 +1,11 @@
+.btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--surface-hover);
+}

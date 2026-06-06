@@ -1,0 +1,49 @@
+.todos {
+  display: grid;
+  gap: 1rem;
+  padding: 2rem;
+  max-width: 32rem;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.badge {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+form {
+  display: flex;
+  gap: 0.5rem;
+}
+input:not([type="checkbox"]) {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.done .text {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+.x {
+  margin-left: auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.empty {
+  color: var(--fg-muted);
+}

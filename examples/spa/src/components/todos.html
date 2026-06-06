@@ -1,0 +1,24 @@
+<!-- Todos template. Two-way `@bind`, keyed `@for`, conditional `@if`,
+     dynamic class `class:done`, and an expression handler `remove(item.id)`. -->
+<main class="todos">
+  <header>
+    <h1>Todos</h1>
+    <span class="badge">{{ remaining }} left</span>
+  </header>
+
+  <form @submit.prevent="add">
+    <input placeholder="What needs doing?" @bind="draft" @keydown.enter="add" />
+    <button type="submit">add</button>
+  </form>
+
+  <ul>
+    <li @for="item in items" :key="item.id" class:done="item.done">
+      <input type="checkbox" @bind="item.done" />
+      <span class="text">{{ item.text }}</span>
+      <button class="x" @click="remove(item.id)">×</button>
+    </li>
+  </ul>
+
+  <p class="empty" @if="items.len == 0">Nothing here yet 🎉</p>
+  <a @link="/">← home</a>
+</main>

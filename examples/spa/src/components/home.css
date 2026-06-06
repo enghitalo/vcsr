@@ -1,0 +1,29 @@
+.home {
+  display: grid;
+  gap: 1.5rem;
+  padding: 2rem;
+  max-width: 28rem;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.value {
+  font-size: 3rem;
+  font-weight: 700;
+  margin: 0;
+}
+.muted {
+  color: var(--fg-muted);
+}
+.ghost {
+  opacity: 0.6;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+nav {
+  display: flex;
+  gap: 1rem;
+}

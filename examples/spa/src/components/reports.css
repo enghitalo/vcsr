@@ -1,0 +1,16 @@
+.reports {
+  display: grid;
+  gap: 1rem;
+  padding: 2rem;
+  max-width: 28rem;
+}
+.muted {
+  color: var(--fg-muted);
+}
+.error {
+  color: var(--danger);
+}
+.total {
+  font-size: 1.5rem;
+  font-weight: 600;
+}

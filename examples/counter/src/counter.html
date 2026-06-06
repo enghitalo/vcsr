@@ -1,0 +1,8 @@
+<!-- Counter template. Identifiers resolve in the Counter struct's scope:
+     {{ count }} reads the `count` signal; {{ doubled }} calls the `doubled`
+     method; @click="inc" binds the `inc` method. Parsed by vcsr (not V). -->
+<main class="counter">
+  <h1>{{ count }}</h1>
+  <p class="muted">double: {{ doubled }}</p>
+  <button @click="inc">+1</button>
+</main>

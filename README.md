@@ -12,16 +12,37 @@ mutate the DOM — and that is designed to be **served by
 [vanilla](https://github.com/enghitalo/vanilla)**, the high-performance V HTTP
 server.
 
-It rests on two design ideas (summarized in [docs/DESIGN.md](docs/DESIGN.md)):
+It rests on three design ideas (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+and [docs/DESIGN.md](docs/DESIGN.md)):
 
-- **A minimal `js` FFI substrate** — the irreducible host-call layer the compiler
-  targets at the bottom: hold a host reference and `get`/`set`/`call`/`new` on it
-  (the WASM equivalent of "JS can touch the DOM"). Everything else — DOM
-  bindings, reactivity, components — is a library on top.
+- **Standalone compiler — no V changes.** vcsr never modifies the V compiler.
+  It is a source generator with its own `.html`/`.css` parsers that emits **plain
+  V**, which the stock `v` then compiles to WASM. (So there are no `$vui`/`$css`
+  comptime builtins — those would require forking V.)
+- **A minimal `js` FFI substrate** — the irreducible host-call layer the
+  generated code targets: hold a host reference and `get`/`set`/`call`/`new` on
+  it (the WASM equivalent of "JS can touch the DOM"). DOM bindings, reactivity,
+  and components are all plain-V libraries on top.
 - **An embedded-HTML, clone-and-patch rendering model** — templates are compiled
   to a static HTML skeleton (embedded in the WASM data segment) plus a slot
   table, registered once as a native `<template>`, cloned per instance, and
   patched surgically by fine-grained signals (no Virtual DOM).
+
+### Components are a file triplet (no inline magic strings)
+
+A component is up to three co-located files sharing a basename — logic, template,
+styles in **separate files**, parsed by vcsr:
+
+```
+counter/
+├── counter.v      # @[component] struct + signals + handlers (logic only)
+├── counter.html   # the template: {{ count }}, @click="inc", @for/@if/@bind …
+└── counter.css    # scoped styles
+```
+
+vcsr pairs them, resolves the template's references against the struct, and
+generates `counter.gen.v` (plain V implementing `view()`/`style()`). See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Why pair a CSR compiler with vanilla?
 
@@ -57,17 +78,18 @@ shared-memory code-splitting that keeps first load small.
 ## Compiler pipeline
 
 ```
-  .v components (+ $vui templates, $css styles)
+  component triplet:  name.v (logic) + name.html (template) + name.css (styles)
         │
         ▼
  ┌──────────────────────────────────────────────────────────────┐
- │ 1 parse      markup → AST                          (phase 01)  │
+ │ 1 parse      .html template → AST                  (phase 01)  │
  │ 2 slots      AST → static HTML skeleton + slot table (phase 02)│
  │ 3 bind       slots → reactive binding code         (phase 03)  │
- │ 4 component  props/typing/composition/hoisting     (phase 04)  │
- │ 5 css        scope + atomize + tree-shake          (phase 05)  │
+ │ 4 component  pair .v/.html/.css, resolve refs,                 │
+ │              EMIT PLAIN V (name.gen.v)             (phase 04)  │
+ │ 5 css        parse .css → scope + atomize + shake  (phase 05)  │
  │ 6 router     route table → chunk plan (core/lazy)  (phase 06)  │
- │ 7 wasm       core MAIN + side modules, shared mem  (phase 07)  │
+ │ 7 wasm       stock `v -b wasm`: core MAIN + sides  (phase 07)  │
  │ 8 bundle     dist/ + hashing + brotli + sourcemaps (phase 08)  │
  │ 9 manifest   asset table for vanilla (mime/cache)  (phase 09)  │
  │10 optimize   wasm-opt, prefetch hints, e2e         (phase 10)  │
@@ -76,6 +98,10 @@ shared-memory code-splitting that keeps first load small.
         ▼
   dist/  ──────────────▶  served by vanilla (static + manifest)
 ```
+
+Steps 1–5 are pure vcsr (parsers + codegen → plain V). Step 7 shells out to an
+**unmodified** `v`. vcsr never patches the V compiler — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Output layout (`dist/`)
 
@@ -102,6 +128,19 @@ vcsr watch  ./src                        # dev server (HMR, source maps)
 vcsr check  ./src                        # type/template diagnostics only
 vcsr serve  dist                         # reference vanilla server over the bundle
 ```
+
+## Examples
+
+See [examples/](examples) for illustrative apps (source-only until the compiler
+lands):
+
+- [examples/counter](examples/counter) — the minimum: one component, signals, a
+  computed value, scoped CSS.
+- [examples/spa](examples/spa) — full feature set: router + code splitting (a
+  lazy route), a shared component hoisted to core, a global store, two-way
+  binding, list rendering, async fetch.
+- [examples/serve-with-vanilla](examples/serve-with-vanilla) — serving a built
+  `dist/` bundle with the vanilla HTTP server.
 
 ## Serving it with vanilla
 
@@ -147,11 +186,11 @@ phase is "done" when its file's assertions hold against the implementation.
 
 | Phase | File | Goal |
 |---|---|---|
-| 01 | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | markup → AST (interpolation, events, directives) |
+| 01 | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | parse a `.html` template file → AST (interpolation, events, directives) |
 | 02 | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table |
 | 03 | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings |
-| 04 | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | components, typed props, composition, hoisting |
-| 05 | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | scope + atomize + tree-shake CSS |
+| 04 | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) |
+| 05 | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope + atomize + tree-shake |
 | 06 | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan |
 | 07 | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory |
 | 08 | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps |
