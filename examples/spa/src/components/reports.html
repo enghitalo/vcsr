@@ -1,0 +1,15 @@
+<!-- Reports template. Signal identifiers auto-read (and subscribe): `loading`,
+     `error`, `report`. `report?.title` optional-chains the unwrapped value.
+     `<Button>` is the shared component (hoisted to core, reused here). -->
+<main class="reports">
+  <p class="muted" @if="loading">loading…</p>
+  <p class="error" @if="error != ''">{{ error }}</p>
+
+  <article @if="report != none">
+    <h1>{{ report?.title }}</h1>
+    <p class="total">total: {{ report?.total }}</p>
+    <Button label="Export CSV" @click="export_csv" />
+  </article>
+
+  <a @link="/">← home</a>
+</main>

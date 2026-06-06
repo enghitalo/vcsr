@@ -24,14 +24,20 @@ vcsr watch  ./src                        # dev server with HMR + source maps
 
 ## The shape of every app
 
-- Components are `@[component]` structs that embed `vcsr.Component` and provide a
-  `view() vcsr.View` (and optionally a `style() string` and lifecycle hooks like
-  `on_mount()`).
-- `view()` returns `$vui('…')` — markup compiled at build time into a static HTML
-  skeleton (embedded in the WASM) plus a slot table; the dynamic holes are bound
-  to signals for surgical, no-Virtual-DOM updates.
-- `style()` returns `$css('…')` — scoped + atomized + tree-shaken at build time.
-- Reactivity is `signal` / `computed` / `effect`. A write updates only the slot
-  nodes that read it.
+A component is a **file triplet** sharing a basename (see
+[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)):
+
+- `name.v` — logic: a `@[component]` struct (embedding `vcsr.Component`), its
+  signal fields, event handlers, computed methods, and lifecycle hooks like
+  `on_mount()`. **No `view()`/`style()`** — vcsr generates those.
+- `name.html` — the template, in vcsr's dialect: `{{ expr }}`, `@click="handler"`,
+  `@bind="signal"`, `@if`/`@for`/`:key`, `class:x`, `<Child :prop="…" />`.
+  Identifiers resolve in the component's scope.
+- `name.css` — plain CSS, scoped to the component at build time.
+
+vcsr parses the `.html`/`.css` (its own parsers — **no V compiler changes, no
+`$vui`/`$css`**) and emits `name.gen.v` (plain V implementing `view()`/`style()`),
+which stock `v` compiles. Reactivity is `signal` / `computed` / `effect`: a write
+updates only the slot nodes that read it.
 
 See [docs/DESIGN.md](../docs/DESIGN.md) for why this is the high-performance path.

@@ -1,0 +1,20 @@
+<!-- Home template. `{{ count }}` reads the signal; `{{ doubled }}` calls the
+     computed method; `<Button>` is resolved to the shared component by vcsr
+     (no V import needed in home.v — the generated code wires it up). -->
+<main class="home">
+  <header>
+    <h1>vcsr SPA</h1>
+    <button class="ghost" @click="toggle_theme">theme</button>
+  </header>
+
+  <section class="counter">
+    <p class="value">{{ count }}</p>
+    <p class="muted">double: {{ doubled }}</p>
+    <Button label="+1" @click="inc" />
+  </section>
+
+  <nav>
+    <a @link="/todos">todos →</a>
+    <a @link="/reports/42">reports →</a>
+  </nav>
+</main>

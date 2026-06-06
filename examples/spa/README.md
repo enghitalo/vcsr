@@ -14,12 +14,16 @@ vcsr build ./src --out dist --release
 |---|---|
 | Router + route params | [src/main.v](src/main.v) |
 | **Code splitting** — a lazy route in its own WASM chunk | `/reports` (`lazy: true`) in [src/main.v](src/main.v) |
-| **Shared component** hoisted into core (used by ≥2 routes) | [src/shared/button.v](src/shared/button.v) |
-| Signals + computed | [src/components/home.v](src/components/home.v) |
-| Two-way binding + list/conditional render | [src/components/todos.v](src/components/todos.v) |
-| Async data fetch + loading/error + route param | [src/components/reports.v](src/components/reports.v) |
+| **Shared component** hoisted into core (used by ≥2 routes) | [src/shared/button.v](src/shared/button.v) + [button.html](src/shared/button.html) |
+| Signals + computed | [src/components/home.v](src/components/home.v) + [home.html](src/components/home.html) |
+| Two-way binding + list/conditional render | [src/components/todos.html](src/components/todos.html) (+ [todos.v](src/components/todos.v)) |
+| Async data fetch + loading/error + route param | [src/components/reports.v](src/components/reports.v) (+ [reports.html](src/components/reports.html)) |
 | Global reactive store + theming | [src/store/store.v](src/store/store.v) |
-| Design tokens + scoped component CSS | [src/styles/global.css](src/styles/global.css) + each `style()` |
+| Design tokens + scoped component CSS | [src/styles/global.css](src/styles/global.css) + each component's `.css` |
+
+Every component is a triplet (`*.v` logic + `*.html` template + `*.css` styles);
+vcsr generates the `view()`/`style()` as plain V. See
+[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 ## How splitting plays out here
 

@@ -1,0 +1,17 @@
+/* Counter styles. Plain CSS; vcsr scopes these selectors to the Counter
+   component at build time, so `.counter`/`.muted` can't collide with any other
+   component. Tree-shaken if a class is never referenced by counter.html. */
+.counter {
+  display: grid;
+  gap: 0.5rem;
+  padding: 2rem;
+  max-width: 20rem;
+}
+.muted {
+  color: var(--muted, #888);
+}
+button {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}

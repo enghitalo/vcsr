@@ -1,13 +1,22 @@
-// Phase 05 — Scoped CSS: scope + atomize + tree-shake.
+// Phase 05 — Scoped CSS: parse a `.css` file, then scope + atomize + tree-shake.
 //
-// GOAL: each component's `$css('…')` is (1) scoped so its selectors can't leak
-// or collide across components, (2) atomized so identical declarations are
-// shared app-wide, and (3) tree-shaken so rules whose classes no template
-// references are dropped. The output is one stylesheet plus a class-rename map
-// the templates use.
+// GOAL: each component's separate `.css` file (NOT a `$css('…')` builtin) is
+// (1) scoped so its selectors can't leak or collide across components,
+// (2) atomized so identical declarations are shared app-wide, and (3) tree-shaken
+// so rules whose classes no template references are dropped. The output is one
+// stylesheet plus a class-rename map the generated views use.
+//
+// See ../docs/ARCHITECTURE.md — styles live in `name.css`, parsed by vcsr.
 module main
 
 import vcsr.css
+
+fn test_loads_and_scopes_a_css_file() {
+	// vcsr reads `counter.css`; `scope` works on its contents, keyed to the
+	// owning component so two components' `.box` never collide.
+	out := css.scope('Counter', '.value { font-size: 3rem; }')!
+	assert out.css.contains('value_')
+}
 
 fn test_scopes_class_selectors_with_hash() {
 	out := css.scope('Counter', '.value { font-size: 3rem; }')!

@@ -15,13 +15,13 @@ import vcsr.slots
 import vcsr.bind { BindKind }
 
 fn plan(markup string) bind.BindingPlan {
-	ast := parser.parse(markup) or { panic(err) }
+	ast := parser.parse_template(markup) or { panic(err) }
 	ct := slots.compile(ast) or { panic(err) }
 	return bind.plan(ct) or { panic(err) }
 }
 
 fn test_text_slot_becomes_effect() {
-	p := plan('<h1>${count}</h1>')
+	p := plan('<h1>{{ count }}</h1>')
 	b := p.bindings[0]
 	assert b.kind == BindKind.effect
 	assert b.slot == 0
@@ -31,19 +31,19 @@ fn test_text_slot_becomes_effect() {
 
 fn test_effect_dependency_set_is_exact() {
 	// only signals actually read are dependencies; `k` is a constant, not a dep
-	p := plan('<p>${a + b * 2}</p>')
+	p := plan('<p>{{ a + b * 2 }}</p>')
 	assert p.bindings[0].reads.sorted() == ['a', 'b']
 }
 
 fn test_computed_is_memoized_node() {
-	p := plan('<p>${doubled}</p>')
+	p := plan('<p>{{ doubled }}</p>')
 	// `doubled` resolves to a computed; the plan references it without inlining
 	assert p.bindings[0].reads == ['doubled']
 	assert p.uses_computed('doubled')
 }
 
 fn test_event_slot_becomes_listener() {
-	p := plan('<button @click=${inc}>+1</button>')
+	p := plan('<button @click="inc">+1</button>')
 	b := p.bindings[0]
 	assert b.kind == BindKind.listener
 	assert b.event == 'click'
@@ -51,14 +51,14 @@ fn test_event_slot_becomes_listener() {
 }
 
 fn test_event_modifier_prevent_default() {
-	p := plan('<form @submit.prevent=${save}></form>')
+	p := plan('<form @submit.prevent="save"></form>')
 	b := p.bindings[0]
 	assert b.event == 'submit'
 	assert b.prevent_default
 }
 
 fn test_two_way_bind_reads_and_writes() {
-	p := plan('<input @bind=${draft} />')
+	p := plan('<input @bind="draft" />')
 	b := p.bindings[0]
 	assert b.kind == BindKind.two_way
 	// input event writes the signal; signal change writes the .value
@@ -68,14 +68,14 @@ fn test_two_way_bind_reads_and_writes() {
 }
 
 fn test_cond_binding_toggles_node() {
-	p := plan('<div><span @if=${ok}>hi</span></div>')
+	p := plan('<div><span @if="ok">hi</span></div>')
 	b := p.bindings[0]
 	assert b.kind == BindKind.cond
 	assert b.reads == ['ok']
 }
 
 fn test_list_binding_is_keyed() {
-	p := plan('<ul><li @for=${item in items} :key=${item.id}>${item.text}</li></ul>')
+	p := plan('<ul><li @for="item in items" :key="item.id">{{ item.text }}</li></ul>')
 	b := p.bindings[0]
 	assert b.kind == BindKind.keyed_list
 	assert b.reads == ['items']

@@ -48,13 +48,14 @@ parser is far faster. So `vcsr` compiles each template into two parts:
    clone root), their kind (text/attr/event/bind/cond/list), and the driving
    expression.
 
-For example:
+For example, a `counter.html` template file (parsed by vcsr — **not** a V
+compiler builtin; see [ARCHITECTURE.md](ARCHITECTURE.md)):
 
-```
-$vui('<section class="counter"><h1>${count}</h1><button @click=${inc}>+1</button></section>')
+```html
+<section class="counter"><h1>{{ count }}</h1><button @click="inc">+1</button></section>
 ```
 
-lowers to:
+lowers (in the generated `counter.gen.v`) to:
 
 ```v
 const _tpl_html  = '<section class="counter"><h1></h1><button>+1</button></section>'
