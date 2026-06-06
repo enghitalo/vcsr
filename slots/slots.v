@@ -23,9 +23,13 @@ pub mut:
 	kind        SlotKind
 	path        []int            // element-child-index path from the clone root
 	name        string           // attr/event name
+	expr        string           // driving expression: text interpolation, or :attr value
 	target_expr string           // @bind target
 	cond_expr   string           // @if condition
+	source_expr string           // @for source (the `items` in `item in items`)
 	key_expr    string           // @for :key
+	handler     string           // @event handler expression
+	modifiers   []string         // @event modifiers, e.g. ['prevent']
 	row         CompiledTemplate // sub-template for cond/list
 }
 
@@ -59,9 +63,11 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 	// the node's own dynamic bindings become slots keyed to this element
 	for ev in node.events {
 		sl << SlotDesc{
-			kind: .event
-			path: path.clone()
-			name: ev.name
+			kind:      .event
+			path:      path.clone()
+			name:      ev.name
+			handler:   ev.handler_expr
+			modifiers: ev.modifiers
 		}
 	}
 	if b := node.binding {
@@ -76,6 +82,7 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 			kind: .attr
 			path: path.clone()
 			name: ab.name
+			expr: ab.expr
 		}
 	}
 
@@ -90,6 +97,7 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 		sl << SlotDesc{
 			kind: .text
 			path: path.clone()
+			expr: node.children[0].expr
 		}
 	} else {
 		mut ei := 0 // element-child index (text/interpolation don't advance it)
@@ -106,10 +114,11 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 						// @for: the row repeats; the slot lives on the container
 						row := compile_node(strip_each(child))!
 						sl << SlotDesc{
-							kind:     .list
-							path:     path.clone()
-							key_expr: ea.key_expr
-							row:      row
+							kind:        .list
+							path:        path.clone()
+							source_expr: ea.source_expr
+							key_expr:    ea.key_expr
+							row:         row
 						}
 					} else if c := child.cond {
 						// @if: leave an anchor; row is the conditional content
