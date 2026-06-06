@@ -103,6 +103,19 @@ vcsr check  ./src                        # type/template diagnostics only
 vcsr serve  dist                         # reference vanilla server over the bundle
 ```
 
+## Examples
+
+See [examples/](examples) for illustrative apps (source-only until the compiler
+lands):
+
+- [examples/counter](examples/counter) — the minimum: one component, signals, a
+  computed value, scoped CSS.
+- [examples/spa](examples/spa) — full feature set: router + code splitting (a
+  lazy route), a shared component hoisted to core, a global store, two-way
+  binding, list rendering, async fetch.
+- [examples/serve-with-vanilla](examples/serve-with-vanilla) — serving a built
+  `dist/` bundle with the vanilla HTTP server.
+
 ## Serving it with vanilla
 
 `vcsr build` emits `dist/manifest.json`. A vanilla request handler reads it once

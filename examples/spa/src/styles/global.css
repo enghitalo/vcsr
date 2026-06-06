@@ -1,0 +1,40 @@
+/* Global design tokens + theme. Component styles live next to each component
+   via $css(...) and are scoped at compile time; this file holds only app-wide
+   variables and the reset. The store toggles data-theme on <html>. */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f4f4f5;
+  --surface-hover: #e9e9ec;
+  --border: #d4d4d8;
+  --fg: #18181b;
+  --fg-muted: #71717a;
+  --accent: #5b21b6;
+  --danger: #dc2626;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a0b;
+  --surface: #18181b;
+  --surface-hover: #27272a;
+  --border: #3f3f46;
+  --fg: #fafafa;
+  --fg-muted: #a1a1aa;
+  --accent: #a78bfa;
+  --danger: #f87171;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
