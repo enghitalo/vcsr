@@ -1,11 +1,101 @@
-# Proposed issue for `enghitalo/vanilla`
+# Serving vcsr bundles: vanilla's `http_server.static_assets`
 
-> Copy the section below into a new issue at
-> https://github.com/enghitalo/vanilla/issues — it is written as a ready-to-file
-> feature request. It is the upstream support `vcsr` needs to serve a
-> CSR/WASM SPA bundle correctly.
+> **Status: IMPLEMENTED upstream.** This began as a vcsr feature request and is
+> now shipped in vanilla — [issue #19][issue] was closed by [commit 50df944][commit]
+> as the `http_server.static_assets` module (plus zero-copy `sendfile(2)`). vcsr
+> **targets** this module: `vcsr build` emits a `dist/` bundle that
+> `static_assets` serves directly — vcsr ships no server of its own. The original
+> upstream proposal is preserved at the bottom for provenance.
+
+[issue]: https://github.com/enghitalo/vanilla/issues/19
+[commit]: https://github.com/enghitalo/vanilla/commit/50df94495be7bad95dc5cbc6e6be7fe53dd7fcb7
+
+## What vanilla now provides
+
+`http_server.static_assets` turns a built SPA bundle directory into a lock-free
+asset server with an allocation-free hot path. Built once at boot from
+`root: 'dist'`, it precomputes a ready-to-send HTTP response for every asset and
+every precompressed representation, then shares them immutably across all worker
+threads:
+
+- **`application/wasm` MIME** — required for `WebAssembly.instantiateStreaming`.
+- **Precompressed negotiation** — serves the prebuilt `.br`/`.gz` sibling per
+  `Accept-Encoding`, with `Content-Encoding` + `Vary: Accept-Encoding`.
+- **Caching policy** — content-hashed assets (matching `immutable_glob`, default
+  `*.[hash].*`) get `Cache-Control: public, max-age=31536000, immutable`; the
+  unhashed `index.html` gets `no-cache` so deploys flip atomically by swapping it.
+- **SPA fallback** — unknown, non-asset paths serve `index.html`; asset-looking
+  404s (`/nope.[hash].wasm`) stay 404; `../` traversal is refused.
+- **ETag/304, Range/206, HEAD** — conditional and partial GETs.
+- **Zero-copy `sendfile(2)`** for bodies ≥ `sendfile_min_bytes` (default 256 KiB),
+  used via `respond_into`, with a buffered fallback on TLS / non-Linux backends.
+
+The whole request handler is two lines:
+
+```v
+import http_server
+import http_server.static_assets
+
+// Built ONCE at boot from the dist/ directory; immutable and lock-free after.
+const assets = static_assets.new(static_assets.Config{
+	root: 'dist'
+	// defaults: spa_fallback = 'index.html', immutable_glob = '*.[hash].*',
+	//           precompressed = [.br, .gz], sendfile_min_bytes = 256 KiB
+}) or { panic(err) }
+
+fn handle(req []u8, _ int, mut out []u8) ! {
+	assets.respond_into(req, mut out)! // sendfile fast path; respond() is the pure-bytes API
+}
+```
+
+See vanilla's `examples/static_assets` and
+`http_server/static_assets/static_assets_test.v` for the full surface.
+
+## vcsr's side of the contract
+
+Because the security-critical, easy-to-get-wrong response logic now lives in
+vanilla, vcsr's job is purely to **emit a `dist/` that `static_assets` can
+consume**:
+
+- content-hashed asset names (`core.[hash].wasm`, `app.[hash].js`,
+  `app.[hash].css`, `route-<name>.[hash].wasm`) that match the `*.[hash].*`
+  immutable glob;
+- an **unhashed `index.html`** entrypoint — the SPA fallback target, served
+  `no-cache`;
+- precompressed `.br`/`.gz` siblings for the text/wasm assets;
+- a `manifest.json` that is vcsr's **own build record** (per-asset hash,
+  route→chunk map, preload hints) consumed by the JS loader and tooling.
+
+> `static_assets` derives MIME, encoding, and cache policy from the files on disk
+> plus the glob — it does **not** read `manifest.json`. The manifest is vcsr's
+> internal record (and drives the loader/preload hints), not the server's header
+> source. Getting the *filenames and siblings* right is what makes vanilla serve
+> the bundle correctly.
+
+The phase-09 spec pins down this emit contract; phase-10 drives a built bundle
+through `static_assets` end-to-end to prove the two halves connect.
+
+## Acceptance criteria (now satisfied upstream)
+
+- [x] `GET /core.[hash].wasm` → `200`, `Content-Type: application/wasm`,
+  `Cache-Control: public, max-age=31536000, immutable`.
+- [x] `GET /app.[hash].js` with `Accept-Encoding: br` and an `app.[hash].js.br`
+  present → `200`, `.br` bytes, `Content-Encoding: br`, `Vary: Accept-Encoding`.
+- [x] `GET /users/42` (no such file) → `200` with `index.html`, `no-cache`.
+- [x] `GET /nope.[hash].wasm` (no such file) → `404` (asset-looking paths are
+  **not** SPA-fallbacked).
+- [x] `GET /../../etc/passwd` → refused.
+- [x] All verifiable through the handler without opening a socket (pure
+  response-building logic), consistent with vanilla's testing style.
 
 ---
+
+<details>
+<summary>Original upstream proposal (historical — filed as issue #19)</summary>
+
+> The text below is the feature request vcsr filed at
+> https://github.com/enghitalo/vanilla/issues/19. It is kept for provenance; the
+> module it proposes now exists (see above).
 
 ## Title
 
@@ -110,3 +200,5 @@ handler and keeps the security-critical path-traversal logic in one audited plac
 
 I'm happy to open a PR implementing `static_assets` against the `handle_request`
 contract, with the pure logic covered by tests in the existing style.
+
+</details>

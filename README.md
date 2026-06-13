@@ -53,15 +53,18 @@ bundle is the *ideal* payload for it: a handful of **static, content-hashed,
 precompressed** files (`index.html`, `app.js`, `*.wasm`, `app.css`). There is no
 per-request server rendering — the server's job is to ship immutable bytes as
 fast as the kernel allows (ETag, `sendfile`, brotli), which is exactly what
-vanilla is built for. `vcsr` emits those bytes **plus a manifest** vanilla reads
-to answer every request with correct `Content-Type`, `Content-Encoding`,
-`Cache-Control`, and SPA-fallback behavior.
+vanilla is built for. `vcsr` emits that `dist/`; vanilla's
+`http_server.static_assets` serves it with the correct `Content-Type`,
+`Content-Encoding`, `Cache-Control`, and SPA-fallback behavior — derived from the
+filenames, so vanilla never has to render anything per request.
 
-> Serving a CSR/WASM bundle needs a few things vanilla's `static_files` example
-> doesn't cover yet (notably `application/wasm`, precompressed-asset negotiation,
-> immutable caching, and SPA fallback). Those are written up as a concrete
-> proposal in [docs/ISSUE-vanilla-static-assets.md](docs/ISSUE-vanilla-static-assets.md)
-> to file upstream.
+> Serving a CSR/WASM bundle needs a few things a bare file server doesn't
+> (notably `application/wasm`, precompressed-asset negotiation, immutable caching,
+> and SPA fallback). vanilla now ships exactly that as `http_server.static_assets`
+> ([issue #19](https://github.com/enghitalo/vanilla/issues/19), implemented in
+> [50df944](https://github.com/enghitalo/vanilla/commit/50df94495be7bad95dc5cbc6e6be7fe53dd7fcb7)),
+> so vcsr just emits a `dist/` it serves — see
+> [docs/VANILLA-STATIC-ASSETS.md](docs/VANILLA-STATIC-ASSETS.md).
 
 ## The performance thesis (what makes it fast)
 
@@ -93,12 +96,12 @@ shared-memory code-splitting that keeps first load small.
  │ 6 router     route table → chunk plan (core/lazy)  (phase 06)  │
  │ 7 wasm       stock `v -b wasm`: core MAIN + sides  (phase 07)  │
  │ 8 bundle     dist/ + hashing + brotli + sourcemaps (phase 08)  │
- │ 9 manifest   asset table for vanilla (mime/cache)  (phase 09)  │
+ │ 9 manifest   build record + dist/ for static_assets (phase 09) │
  │10 optimize   wasm-opt, prefetch hints, e2e         (phase 10)  │
  └──────────────────────────────────────────────────────────────┘
         │
         ▼
-  dist/  ──────────────▶  served by vanilla (static + manifest)
+  dist/  ──────────────▶  served by vanilla's http_server.static_assets
 ```
 
 Steps 1–5 are pure vcsr (parsers + codegen → plain V). Step 7 shells out to an
@@ -116,11 +119,14 @@ dist/
 ├── app.[hash].css          scoped + atomized stylesheet
 ├── *.br / *.gz             precompressed siblings of each text/wasm asset
 ├── *.map                   source maps back to .v
-└── manifest.json           asset → { hash, content_type, encoding, cache, route? }
+└── manifest.json           vcsr's build record: { hash, route?, preload } — drives the loader
 ```
 
-Every asset except `index.html` is content-hashed and immutable; `index.html`
-is tiny and `no-cache`, so deploys flip atomically by swapping it.
+Every asset except `index.html` is content-hashed; `index.html` is tiny and
+unhashed, so deploys flip atomically by swapping it. vanilla's `static_assets`
+derives `Content-Type`/`Cache-Control`/encoding from the filenames + the
+`*.[hash].*` glob (immutable for hashed assets, `no-cache` for `index.html`) — it
+does not read `manifest.json`, which is vcsr's own record for the JS loader.
 
 ## CLI (planned)
 
@@ -146,40 +152,47 @@ lands):
 
 ## Serving it with vanilla
 
-`vcsr build` emits `dist/manifest.json`. A vanilla request handler reads it once
-at boot and answers each request with the right headers — the response building
-is pure logic (testable without a socket, exactly like vanilla's own
-`static_files` tests):
+`vcsr build` emits a `dist/` bundle; vanilla's `http_server.static_assets` serves
+it. The whole handler is two lines — `static_assets.new` reads the bundle once at
+boot, precomputes a response for every asset, and shares it lock-free across
+workers:
 
 ```v
 import http_server
-import vcsr.serve { AssetServer }
+import http_server.static_assets
 
-// load the manifest produced by `vcsr build`
-mut assets := AssetServer.load('dist/manifest.json')!
+// Built once at boot from the dist/ vcsr emitted; immutable afterwards.
+const assets = static_assets.new(static_assets.Config{
+	root: 'dist'
+	// defaults: spa_fallback = 'index.html', immutable_glob = '*.[hash].*',
+	//           precompressed = [.br, .gz], sendfile_min_bytes = 256 KiB
+}) or { panic(err) }
 
-fn handle_request(req []u8, fd int) ![]u8 {
-	// AssetServer resolves path → asset, negotiates Accept-Encoding (br/gzip),
-	// sets application/wasm + immutable Cache-Control, and falls back to
-	// index.html for client-side routes. Returns raw HTTP bytes for vanilla.
-	return assets.respond(req)
+fn handle(req []u8, _ int, mut out []u8) ! {
+	// resolves path → asset, negotiates Accept-Encoding, sets application/wasm +
+	// immutable Cache-Control, falls back to index.html for client routes.
+	// respond_into uses zero-copy sendfile(2) for large bodies (respond() is the
+	// pure-bytes API).
+	assets.respond_into(req, mut out)!
 }
 ```
 
-What `AssetServer` guarantees (and what the phase-09 tests pin down):
+What `static_assets` guarantees (and what vcsr's `dist/` is built to satisfy):
 
 - `*.wasm` → `Content-Type: application/wasm` (**required** for
   `WebAssembly.instantiateStreaming`).
 - `Accept-Encoding: br` / `gzip` → serve the precompressed sibling with
   `Content-Encoding` + `Vary: Accept-Encoding`.
-- hashed assets → `Cache-Control: public, max-age=31536000, immutable`;
-  `index.html` → `Cache-Control: no-cache`.
+- hashed assets (`*.[hash].*`) → `Cache-Control: public, max-age=31536000,
+  immutable`; unhashed `index.html` → `Cache-Control: no-cache`.
 - unknown, non-asset path (a client route like `/users/42`) → serve
-  `index.html` so deep links and refreshes work (SPA fallback).
-- ETag / `If-None-Match` and `Range` reuse vanilla's existing support.
+  `index.html` so deep links and refreshes work (SPA fallback); asset-looking
+  404s stay 404.
+- ETag/304, Range/206, HEAD, and `../` path-traversal refusal are built in.
 
-The upstream gaps this relies on are proposed in
-[docs/ISSUE-vanilla-static-assets.md](docs/ISSUE-vanilla-static-assets.md).
+vcsr's only job here is emitting filenames + `.br`/`.gz` siblings the module
+expects; the integration is documented in
+[docs/VANILLA-STATIC-ASSETS.md](docs/VANILLA-STATIC-ASSETS.md).
 
 ## Development roadmap & tests
 
@@ -196,7 +209,7 @@ phase is "done" when its file's assertions hold against the implementation.
 | 06 | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan |
 | 07 | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory |
 | 08 | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps |
-| 09 | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + vanilla response building |
+| 09 | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + a `static_assets`-consumable `dist/` (vanilla serves it) |
 | 10 | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle |
 
 ### Building & testing

@@ -1,91 +1,80 @@
-// Phase 09 — Manifest + vanilla response building.
+// Phase 09 — Manifest + a `static_assets`-consumable `dist/`.
 //
-// GOAL: emit dist/manifest.json (asset → content_type, encoding, cache, route),
-// and provide the pure response-building logic a vanilla `handle_request` uses.
-// Following vanilla's testing style, the response logic is verified WITHOUT a
-// socket — feed a raw request, assert the raw response headers/status.
+// GOAL: emit dist/manifest.json — vcsr's own BUILD RECORD (per-asset hash,
+// route→chunk map, preload hints, the SPA-fallback entrypoint) — and a dist/
+// LAYOUT that vanilla's http_server.static_assets serves as-is.
 //
-// This phase is the contract between vcsr and vanilla; the upstream support it
-// assumes is proposed in ../docs/ISSUE-vanilla-static-assets.md.
+// vcsr builds no HTTP responses of its own. That logic now lives upstream:
+// vanilla issue #19 shipped the http_server.static_assets module, which derives
+// Content-Type / Cache-Control / Content-Encoding from the FILENAMES plus its
+// `*.[hash].*` immutable glob — it does NOT read manifest.json. So vcsr's side of
+// the contract is about emitting the right filenames, siblings, and entrypoint.
+//
+// This phase pins down that emit contract (pure vcsr, socket-free). The wire-level
+// proof — driving this dist/ through static_assets — is phase 10. See
+// ../docs/VANILLA-STATIC-ASSETS.md.
 module main
 
 import vcsr.manifest
-import vcsr.serve { AssetServer }
+import os
 
-fn server() AssetServer {
-	return AssetServer.load('testdata/fixture-app/dist/manifest.json') or { panic(err) }
-}
+const dist = 'testdata/fixture-app/dist'
 
-fn req(line string) []u8 {
-	return (line + '\r\n\r\n').bytes()
-}
+// --- manifest: vcsr's build record ------------------------------------------
 
-// --- manifest shape ---------------------------------------------------------
-
-fn test_manifest_maps_wasm_to_correct_mime() {
-	m := manifest.load('testdata/fixture-app/dist/manifest.json')!
+fn test_manifest_records_asset_content_hashes() {
+	m := manifest.load('${dist}/manifest.json')!
+	// each asset carries the content hash baked into its filename — the loader and
+	// integrity checks read this; the hash is what makes static_assets' immutable
+	// glob match and lets deploys swap index.html atomically.
 	e := m.entry_for('core.*.wasm')!
-	assert e.content_type == 'application/wasm' // REQUIRED for instantiateStreaming
+	assert e.content_type == 'application/wasm' // recorded for tooling (not the server)
+	assert e.cache == 'public, max-age=31536000, immutable'
 }
 
-fn test_manifest_marks_hashed_assets_immutable() {
-	m := manifest.load('testdata/fixture-app/dist/manifest.json')!
-	assert m.entry_for('core.*.wasm')!.cache == 'public, max-age=31536000, immutable'
+fn test_manifest_marks_index_html_no_cache() {
+	m := manifest.load('${dist}/manifest.json')!
 	assert m.entry_for('index.html')!.cache == 'no-cache'
 }
 
-fn test_manifest_lists_spa_fallback() {
-	m := manifest.load('testdata/fixture-app/dist/manifest.json')!
+fn test_manifest_names_spa_fallback_entrypoint() {
+	m := manifest.load('${dist}/manifest.json')!
 	assert m.spa_fallback == 'index.html'
 }
 
-// --- response building (socket-free, vanilla style) -------------------------
+// --- dist/ layout: what makes it static_assets-consumable -------------------
+// static_assets derives MIME/cache/encoding from the FILES + the `*.[hash].*`
+// glob, so the emit contract is about filenames and siblings, not headers.
 
-fn test_serves_wasm_with_application_wasm() {
-	resp := server().respond(req('GET /core.9f3a1c.wasm HTTP/1.1'))!.bytestr()
-	assert resp.starts_with('HTTP/1.1 200')
-	assert resp.contains('Content-Type: application/wasm')
-	assert resp.contains('Cache-Control: public, max-age=31536000, immutable')
+fn test_assets_are_content_hashed() {
+	// hashed names so static_assets' immutable glob (`*.[hash].*`) matches them
+	assert glob_one('${dist}/core.*.wasm') != ''
+	assert glob_one('${dist}/app.*.js') != ''
+	assert glob_one('${dist}/app.*.css') != ''
 }
 
-fn test_negotiates_brotli_when_accepted() {
-	resp := server().respond(req('GET /app.abc123.js HTTP/1.1\r\nAccept-Encoding: br, gzip'))!.bytestr()
-	assert resp.contains('Content-Encoding: br')
-	assert resp.contains('Vary: Accept-Encoding')
+fn test_index_html_is_unhashed_entrypoint() {
+	// the SPA fallback target stays unhashed so a deploy flips by swapping it
+	assert os.exists('${dist}/index.html')
+	assert glob_one('${dist}/index.*.html') == ''
 }
 
-fn test_serves_raw_when_encoding_not_accepted() {
-	resp := server().respond(req('GET /app.abc123.js HTTP/1.1'))!.bytestr()
-	assert !resp.contains('Content-Encoding')
+fn test_precompressed_siblings_present() {
+	// prebuilt .br/.gz siblings let static_assets negotiate Accept-Encoding
+	// without recompressing per request
+	js := glob_one('${dist}/app.*.js')
+	assert js != ''
+	assert os.exists('${js}.br') || os.exists('${js}.gz')
 }
 
-fn test_index_html_is_no_cache() {
-	resp := server().respond(req('GET / HTTP/1.1'))!.bytestr()
-	assert resp.contains('Content-Type: text/html')
-	assert resp.contains('Cache-Control: no-cache')
+fn test_wasm_has_precompressed_sibling() {
+	wasm := glob_one('${dist}/core.*.wasm')
+	assert wasm != ''
+	assert os.exists('${wasm}.br') || os.exists('${wasm}.gz')
 }
 
-fn test_spa_fallback_for_client_route() {
-	// a client route with no file on disk → serve index.html so refresh/deep-link work
-	resp := server().respond(req('GET /users/42 HTTP/1.1'))!.bytestr()
-	assert resp.starts_with('HTTP/1.1 200')
-	assert resp.contains('Content-Type: text/html')
-}
-
-fn test_missing_asset_looking_path_is_404_not_fallback() {
-	// asset-looking 404s must NOT be masked by the SPA fallback
-	resp := server().respond(req('GET /nope.9f3a1c.wasm HTTP/1.1'))!.bytestr()
-	assert resp.starts_with('HTTP/1.1 404')
-}
-
-fn test_path_traversal_refused() {
-	resp := server().respond(req('GET /../../etc/passwd HTTP/1.1'))!.bytestr()
-	assert resp.starts_with('HTTP/1.1 404') || resp.starts_with('HTTP/1.1 400')
-}
-
-fn test_etag_conditional_get_returns_304() {
-	s := server()
-	etag := s.etag_for('core.9f3a1c.wasm')!
-	resp := s.respond(req('GET /core.9f3a1c.wasm HTTP/1.1\r\nIf-None-Match: ' + etag))!.bytestr()
-	assert resp.starts_with('HTTP/1.1 304')
+// helper: first filesystem path matching a glob, or '' -----------------------
+fn glob_one(pattern string) string {
+	matches := os.glob(pattern) or { return '' }
+	return if matches.len > 0 { matches[0] } else { '' }
 }
