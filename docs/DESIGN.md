@@ -154,13 +154,15 @@ dist/
 ├── app.[hash].css          scoped + atomized stylesheet
 ├── *.br / *.gz             precompressed siblings
 ├── *.map                   source maps back to .v
-└── manifest.json           asset → { hash, content_type, encoding, cache, route? }
+└── manifest.json           vcsr's build record: { hash, route?, preload } — drives the loader
 ```
 
-A vanilla request handler reads the manifest once and answers each request with
-the correct `Content-Type` (notably `application/wasm`, required for
-`instantiateStreaming`), `Content-Encoding` (negotiated from `Accept-Encoding`),
-`Cache-Control` (immutable for hashed assets, `no-cache` for `index.html`), and
-SPA fallback (serve `index.html` for unknown client routes, but still 404 for
-asset-looking paths). The upstream support this needs is proposed in
-[ISSUE-vanilla-static-assets.md](ISSUE-vanilla-static-assets.md).
+vanilla's `http_server.static_assets` serves this `dist/` directly: it answers
+each request with the correct `Content-Type` (notably `application/wasm`,
+required for `instantiateStreaming`), `Content-Encoding` (negotiated from
+`Accept-Encoding`), `Cache-Control` (immutable for hashed assets, `no-cache` for
+`index.html`), and SPA fallback (serve `index.html` for unknown client routes,
+but still 404 for asset-looking paths) — all derived from the filenames + the
+`*.[hash].*` glob, not from `manifest.json`. The module landed upstream as
+[issue #19](https://github.com/enghitalo/vanilla/issues/19); the integration is
+documented in [VANILLA-STATIC-ASSETS.md](VANILLA-STATIC-ASSETS.md).

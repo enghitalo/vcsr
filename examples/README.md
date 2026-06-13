@@ -20,7 +20,7 @@ vcsr watch  ./src                        # dev server with HMR + source maps
 |---|---|
 | [counter](counter) | the minimum: one component, signals, a computed value, an event, scoped CSS — rendered 100% client-side into an empty page |
 | [spa](spa) | the full feature set: router + code splitting (a lazy route), a shared component hoisted to core, a global store, two-way binding, list rendering, async data fetch |
-| [serve-with-vanilla](serve-with-vanilla) | serving a built `dist/` bundle with the [vanilla](https://github.com/enghitalo/vanilla) HTTP server via `vcsr.serve.AssetServer` |
+| [serve-with-vanilla](serve-with-vanilla) | serving a built `dist/` bundle with the [vanilla](https://github.com/enghitalo/vanilla) HTTP server via `http_server.static_assets` |
 
 ## The shape of every app
 

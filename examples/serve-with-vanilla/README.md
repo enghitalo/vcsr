@@ -11,9 +11,10 @@ vcsr build ../spa/src --out dist --release
 v -prod run .
 ```
 
-[main.v](main.v) is the whole integration: load the manifest `vcsr build` wrote,
-then return `assets.respond(req)` from vanilla's `handle_request`. The
-`AssetServer` handles the parts that are easy to get subtly wrong:
+[main.v](main.v) is the whole integration: point `static_assets.new` at the
+`dist/` that `vcsr build` wrote, then call `assets.respond_into(req, mut out)`
+from vanilla's request handler. `http_server.static_assets` handles the parts
+that are easy to get subtly wrong:
 
 - `*.wasm` → `Content-Type: application/wasm` (required for
   `WebAssembly.instantiateStreaming`)
@@ -23,13 +24,18 @@ then return `assets.respond(req)` from vanilla's `handle_request`. The
   `index.html` → `no-cache`
 - unknown client route (e.g. `/reports/42`) → serve `index.html` (SPA fallback),
   but asset-looking 404s stay 404
-- ETag / `If-None-Match` and `Range` reuse vanilla's existing support
+- ETag/304, Range/206, HEAD, and `../` path-traversal refusal are built in
+- large bodies stream with zero-copy `sendfile(2)` via `respond_into`
 
-> These capabilities are proposed upstream in
-> [docs/ISSUE-vanilla-static-assets.md](../../docs/ISSUE-vanilla-static-assets.md).
-> Until they land in vanilla, `vcsr.serve.AssetServer` provides them on top of
-> vanilla's raw `handle_request` contract.
+> This module landed in vanilla as
+> [issue #19](https://github.com/enghitalo/vanilla/issues/19) (commit
+> [50df944](https://github.com/enghitalo/vanilla/commit/50df94495be7bad95dc5cbc6e6be7fe53dd7fcb7));
+> the integration is documented in
+> [docs/VANILLA-STATIC-ASSETS.md](../../docs/VANILLA-STATIC-ASSETS.md). vcsr's job
+> ends at emitting a `dist/` whose filenames and `.br`/`.gz` siblings match what
+> the module expects — it ships no server of its own.
 
-Because response building is pure (request bytes → response bytes), it is
-testable without opening a socket — see the phase-09 spec in
+The response logic is pure (request bytes → response bytes) and lives in vanilla,
+which tests it without a socket. vcsr's side — that the emitted `dist/` is
+servable — is pinned by the phase-09 spec in
 [../../tests/phase_09_vanilla_manifest_test.v](../../tests/phase_09_vanilla_manifest_test.v).
