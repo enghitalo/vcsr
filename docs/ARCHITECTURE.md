@@ -10,12 +10,23 @@ stock V compiler turns into WASM.
   your sources                vcsr (standalone)                stock toolchain
   ────────────                ─────────────────                ───────────────
   counter.v   (logic)   ┐
-  counter.html (template)├──▶  parse .html + .css   ──▶  counter.gen.v  ──▶  v -b wasm  ──▶  *.wasm
-  counter.css (styles)  ┘     resolve refs, codegen      (plain V)            (unmodified V)
+  counter.html (template)├──▶  parse .html + .css   ──▶  counter.gen.v  ──▶  v -cc clang ──▶  *.wasm
+  counter.css (styles)  ┘     resolve refs, codegen      (plain V)            (→ WASI SDK)
 ```
 
 Nothing in this pipeline patches V. vcsr is "just" a code generator + a runtime
 library written in ordinary V.
+
+> **On the compile step.** The "stock toolchain" box is `v -cc clang` feeding the
+> [WASI SDK](https://github.com/WebAssembly/wasi-sdk) (`clang --target=wasm32-wasip1`),
+> **not** `v -b wasm`. As of V `130caaf` (2026-06), the native `-b wasm` backend
+> still can't compile the runtime — `vlib/v/gen/wasm/gen.v` errors `wasm backend
+> does not support dynamic arrays`, and its browser DOM interop is `fn JS.*`
+> passing `(ptr,len)` through linear memory, not `externref`. The C→clang route
+> compiles V's full language + stdlib (with `-gc none` + a small WASI shim). The
+> wasm *interface* vcsr targets — and which producer/toolchain may change over
+> time — is pinned in [WASM-ABI.md](WASM-ABI.md); all three V→WASM routes are
+> measured feature-by-feature in [WASM-PATHS-ANALYSIS.md](WASM-PATHS-ANALYSIS.md).
 
 ## Why not `$vui` / `$css`?
 
@@ -115,7 +126,7 @@ Key properties the phase-04 spec pins down:
 vcsr build ./src --out dist     # 1) scan .v for @[component], pair with .html/.css
                                 # 2) parse templates/styles, type-check refs
                                 # 3) emit *.gen.v (plain V) + scoped app.css
-                                # 4) invoke stock `v` to compile .v + .gen.v → wasm
+                                # 4) invoke stock `v` (v -cc clang → WASI SDK) to compile .v + .gen.v → wasm
                                 # 5) bundle: hashing, brotli, manifest (phases 08–10)
 ```
 
@@ -125,8 +136,10 @@ modern frontend compiler does without a single change to the V language.
 
 ## Consequences
 
-- **No V fork to maintain.** Upgrade V freely; vcsr only depends on `v -b wasm`
-  (or the wasi-sdk path) accepting normal V.
+- **No V fork to maintain.** Upgrade V freely; vcsr only depends on the stock
+  `v` accepting normal V and emitting wasm — today the `v -cc clang` + WASI SDK
+  path (the native `-b wasm` backend isn't ready; see the note above and
+  [WASM-ABI.md](WASM-ABI.md)).
 - **`.html`/`.css` get real tooling.** Because they're real files in known
   languages, editors give syntax highlighting, formatters, and linters for free —
   something inline `$vui('…')` strings never get.

@@ -2,3 +2,9 @@ dist/
 *.wasm
 *.br
 *.gz
+
+# ...except small, hand-authored .wasm checked in as test/demo fixtures
+# (language-neutral ABI fixtures + the fetch/localStorage demo). These are
+# committed so the test/demo run without a wasm toolchain installed.
+!tests/fixtures/abi/*.wasm
+!docs/examples/webapi-demo/*.wasm

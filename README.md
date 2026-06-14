@@ -3,7 +3,7 @@
 > **Status: implementation in progress (TDD).** Phases 01–03 are **implemented
 > and passing** — the `.html` parser ([`ast/`](ast), [`parser/`](parser)), slot
 > extraction ([`slots/`](slots)), and reactive binding ([`bind/`](bind)). Phases
-> 04–10 remain spec-first: their `tests/` files describe the behavior each phase
+> 04–11 remain spec-first: their `tests/` files describe the behavior each phase
 > must satisfy before the code lands.
 
 `vcsr` compiles V UI components into a **fully client-side rendered (CSR)**
@@ -17,8 +17,10 @@ and [docs/DESIGN.md](docs/DESIGN.md)):
 
 - **Standalone compiler — no V changes.** vcsr never modifies the V compiler.
   It is a source generator with its own `.html`/`.css` parsers that emits **plain
-  V**, which the stock `v` then compiles to WASM. (So there are no `$vui`/`$css`
-  comptime builtins — those would require forking V.)
+  V**, which the stock `v` then compiles to WASM — today via `v -cc clang` + the
+  WASI SDK (see [docs/WASM-ABI.md](docs/WASM-ABI.md)), since V's native `-b wasm`
+  backend can't yet compile the runtime. (So there are no `$vui`/`$css` comptime
+  builtins — those would require forking V.)
 - **A minimal `js` FFI substrate** — the irreducible host-call layer the
   generated code targets: hold a host reference and `get`/`set`/`call`/`new` on
   it (the WASM equivalent of "JS can touch the DOM"). DOM bindings, reactivity,
@@ -94,7 +96,7 @@ shared-memory code-splitting that keeps first load small.
  │              EMIT PLAIN V (name.gen.v)             (phase 04)  │
  │ 5 css        parse .css → scope + atomize + shake  (phase 05)  │
  │ 6 router     route table → chunk plan (core/lazy)  (phase 06)  │
- │ 7 wasm       stock `v -b wasm`: core MAIN + sides  (phase 07)  │
+ │ 7 wasm       v -cc clang(wasi): core MAIN + sides  (phase 07)  │
  │ 8 bundle     dist/ + hashing + brotli + sourcemaps (phase 08)  │
  │ 9 manifest   build record + dist/ for static_assets (phase 09) │
  │10 optimize   wasm-opt, prefetch hints, e2e         (phase 10)  │
@@ -105,8 +107,14 @@ shared-memory code-splitting that keeps first load small.
 ```
 
 Steps 1–5 are pure vcsr (parsers + codegen → plain V). Step 7 shells out to an
-**unmodified** `v`. vcsr never patches the V compiler — see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**unmodified** `v` — today `v -cc clang` feeding the WASI SDK, because V's native
+`-b wasm` backend can't yet compile the runtime (it still errors on dynamic
+arrays). vcsr never patches the V compiler — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and
+[docs/WASM-ABI.md](docs/WASM-ABI.md) for the language-neutral module contract
+this step targets. The three V→WASM routes (native `-b wasm`, V→clang, pure
+clang) are measured feature-by-feature against the browser baseline in
+[docs/WASM-PATHS-ANALYSIS.md](docs/WASM-PATHS-ANALYSIS.md).
 
 ## Output layout (`dist/`)
 
@@ -196,8 +204,9 @@ expects; the integration is documented in
 
 ## Development roadmap & tests
 
-Development is split into ten phases; each has a spec file under `tests/`. A
-phase is "done" when its file's assertions hold against the implementation.
+Development is split into ten pipeline phases plus a cross-cutting
+ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
+"done" when its file's assertions hold against the implementation.
 
 | Phase | File | Goal |
 |---|---|---|
@@ -211,6 +220,7 @@ phase is "done" when its file's assertions hold against the implementation.
 | 08 | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps |
 | 09 | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + a `static_assets`-consumable `dist/` (vanilla serves it) |
 | 10 | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle |
+| 11 | [phase_11_abi_conformance_test.v](tests/phase_11_abi_conformance_test.v) | the WASM ABI is **language-neutral**: a non-V module (Rust/Zig/C/WAT) honoring the contract conforms — [docs/WASM-ABI.md](docs/WASM-ABI.md), fixtures in [tests/fixtures/abi/](tests/fixtures/abi) |
 
 ### Building & testing
 
@@ -223,9 +233,10 @@ ln -s "$PWD" ~/.vmodules/vcsr            # make `import vcsr.*` resolve
 v test tests/phase_01_template_parser_test.v   # phase 01 — passes
 ```
 
-Phases 02–10 import not-yet-built modules (`vcsr.slots`, …), so `v test tests/`
-as a whole won't pass until those land — run the implemented phase file(s)
-individually.
+Phases 02–11 import not-yet-built modules (`vcsr.slots`, `vcsr.wasm`, …), so
+`v test tests/` as a whole won't pass until those land — run the implemented
+phase file(s) individually. (Phase 11's `.wasm` fixtures, however, are real and
+compile today with `wat2wasm` — see [tests/fixtures/abi/README.md](tests/fixtures/abi/README.md).)
 
 ## Contributing & engineering guidelines
 

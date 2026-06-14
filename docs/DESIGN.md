@@ -35,6 +35,17 @@ Rust's `wasm-bindgen` → `web-sys` → Yew/Leptos; Go's `syscall/js`.)
 Because DOM nodes are `externref` handles, they cross the WASM↔host boundary
 **without being serialized into linear memory** — no manual struct marshalling.
 
+> **`externref` is the target ABI, not yet what V emits.** Neither stock V path
+> lowers a host handle to `externref` today: `v -b wasm`'s browser interop is
+> `fn JS.*` passing `(ptr,len)` through linear memory, and the `v -cc clang` path
+> can't put `externref` in linear memory/structs (and clang still
+> [crashes on `__externref_t` at global scope — LLVM #141011, open](https://github.com/llvm/llvm-project/issues/141011)).
+> So vcsr ships on an **integer handle table** (an `i32` index into a JS-side
+> `Map<i32, JsValue>`) as the bridge, and migrates to `externref` when the
+> toolchain supports it — without touching the frontend. The boundary is a
+> declared value (`boundary_abi.dom`: `.externref` | `.handle_table`); see
+> [WASM-ABI.md](WASM-ABI.md).
+
 ## 2. The render model: embedded HTML, clone-and-patch
 
 Building the DOM node-by-node (`createElement`/`appendChild`) costs one
@@ -124,6 +135,14 @@ chunks coexist in one memory without colliding, and a closure created in a chunk
 lands in the shared table so core can call it. `externref` values (DOM nodes,
 callbacks) need no relocation at all. The emerging Component Model / module
 linking standard replaces the hand-written linker with a manifest.
+
+> **Splitting is roadmap; the MVP may ship a single module.** V does not drive
+> Emscripten-style MAIN/SIDE linking, so this needs either a manual `wasm-ld
+> -shared` step or the Component Model. The contract is pinned by
+> [phase 07](../tests/phase_07_wasm_linking_test.v) and
+> [WASM-ABI.md](WASM-ABI.md) so the frontend can stay fixed while the linking
+> mechanism lands later; a first release can emit one `app.wasm` and still serve
+> through the same vanilla `dist/`.
 
 **Why components aren't hurt by splitting:** a component used by ≥2 routes is
 hoisted into core (one copy, one `<template>` registered once, cached); a
