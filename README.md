@@ -1,10 +1,11 @@
 # vcsr — a high-performance CSR compiler for V
 
-> **Status: implementation in progress (TDD).** Phases 01–03 are **implemented
+> **Status: implementation in progress (TDD).** Phases 01–04 are **implemented
 > and passing** — the `.html` parser ([`ast/`](ast), [`parser/`](parser)), slot
-> extraction ([`slots/`](slots)), and reactive binding ([`bind/`](bind)). Phases
-> 04–11 remain spec-first: their `tests/` files describe the behavior each phase
-> must satisfy before the code lands.
+> extraction ([`slots/`](slots)), reactive binding ([`bind/`](bind)), and the
+> component model ([`component/`](component): pair the triplet, resolve refs,
+> emit plain V). Phases 05–11 remain spec-first: their `tests/` files describe
+> the behavior each phase must satisfy before the code lands.
 
 `vcsr` compiles V UI components into a **fully client-side rendered (CSR)**
 bundle that paints and updates entirely in the browser — no server round-trip to
@@ -213,7 +214,7 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 | 01 ✅ | [phase_01_template_parser_test.v](tests/phase_01_template_parser_test.v) | parse a `.html` template file → AST (interpolation, events, directives) — **implemented** ([ast/](ast), [parser/](parser)) |
 | 02 ✅ | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table — **implemented** ([slots/](slots)) |
 | 03 ✅ | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings — **implemented** ([bind/](bind)) |
-| 04 | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) |
+| 04 ✅ | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) — **implemented** ([component/](component)) |
 | 05 | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope + atomize + tree-shake |
 | 06 | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan |
 | 07 | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory |
@@ -224,16 +225,17 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 
 ### Building & testing
 
-The library modules (`ast`, `parser`) are plain V under the `vcsr` module name.
-To resolve `import vcsr.parser` / `import vcsr.ast`, put the repo on V's module
-path (clone it as `vcsr/`, or symlink it), then run the implemented phase:
+The library modules (`ast`, `parser`, `slots`, `bind`, `component`) are plain V
+under the `vcsr` module name. To resolve `import vcsr.*`, put the repo on V's
+module path (clone it as `vcsr/`, or symlink it), then run the implemented
+phases:
 
 ```sh
 ln -s "$PWD" ~/.vmodules/vcsr            # make `import vcsr.*` resolve
-v test tests/phase_01_template_parser_test.v   # phase 01 — passes
+v test tests/phase_04_component_model_test.v   # phases 01–04 — pass
 ```
 
-Phases 02–11 import not-yet-built modules (`vcsr.slots`, `vcsr.wasm`, …), so
+Phases 05–11 import not-yet-built modules (`vcsr.css`, `vcsr.wasm`, …), so
 `v test tests/` as a whole won't pass until those land — run the implemented
 phase file(s) individually. (Phase 11's `.wasm` fixtures, however, are real and
 compile today with `wat2wasm` — see [tests/fixtures/abi/README.md](tests/fixtures/abi/README.md).)

@@ -130,7 +130,8 @@ pub fn plan(ct CompiledTemplate) !BindingPlan {
 //   'a + b * 2'    -> ['a', 'b']
 //   'user.name'    -> ['user']
 //   'x != none'    -> ['x']
-fn free_idents(expr string) []string {
+// Public so phase 04 can resolve the same candidate set against the struct.
+pub fn free_idents(expr string) []string {
 	mut out := []string{}
 	mut i := 0
 	for i < expr.len {
