@@ -1,0 +1,8 @@
+{
+  "name": "dashboard-app",
+  "routes": [
+    { "path": "/", "component": "Dashboard", "lazy": false }
+  ],
+  "components": ["Dashboard", "Counter", "Todos", "FetchPanel", "About", "DebugOverlay"],
+  "styles": {}
+}

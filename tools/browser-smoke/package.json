@@ -1,0 +1,12 @@
+{
+  "name": "vcsr-browser-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Run a vcsr-built dist/ in a real browser and assert it boots, mounts, and serves correctly.",
+  "scripts": {
+    "smoke": "node browser-smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}
