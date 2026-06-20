@@ -1,11 +1,20 @@
 # vcsr — a high-performance CSR compiler for V
 
-> **Status: implementation in progress (TDD).** Phases 01–04 are **implemented
-> and passing** — the `.html` parser ([`ast/`](ast), [`parser/`](parser)), slot
-> extraction ([`slots/`](slots)), reactive binding ([`bind/`](bind)), and the
-> component model ([`component/`](component): pair the triplet, resolve refs,
-> emit plain V). Phases 05–11 remain spec-first: their `tests/` files describe
-> the behavior each phase must satisfy before the code lands.
+> **Status: all 11 phases implemented and passing (TDD).** `v test tests/` is
+> green end-to-end: the `.html` parser ([`ast/`](ast), [`parser/`](parser)), slot
+> extraction ([`slots/`](slots)), reactive binding ([`bind/`](bind)), the
+> component model ([`component/`](component)), scoped/atomized CSS ([`css/`](css)),
+> the router + code-split plan ([`router/`](router)), the wasm link plan + ABI
+> inspector ([`wasm/`](wasm)), the manifest reader ([`manifest/`](manifest)), and
+> the bundle/e2e build ([`bundle/`](bundle)) serving through vanilla's
+> `http_server.static_assets`.
+>
+> One honest caveat: V cannot yet compile a browser-ready wasm module (native
+> `-b wasm -os browser` panics; `v -cc clang` emits WASI imports — see
+> [docs/WASM-PATHS-ANALYSIS.md](docs/WASM-PATHS-ANALYSIS.md) and the upstream
+> issues it filed). So the bundle's wasm step consumes **prebuilt browser-ABI
+> wasm** fixtures; everything else (hashing, compression, manifest, linking,
+> dead-route elimination, serving) is real.
 
 `vcsr` compiles V UI components into a **fully client-side rendered (CSR)**
 bundle that paints and updates entirely in the browser — no server round-trip to
@@ -215,30 +224,51 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 | 02 ✅ | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table — **implemented** ([slots/](slots)) |
 | 03 ✅ | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings — **implemented** ([bind/](bind)) |
 | 04 ✅ | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) — **implemented** ([component/](component)) |
-| 05 | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope + atomize + tree-shake |
-| 06 | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan |
-| 07 | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory |
-| 08 | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps |
-| 09 | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + a `static_assets`-consumable `dist/` (vanilla serves it) |
-| 10 | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle |
-| 11 | [phase_11_abi_conformance_test.v](tests/phase_11_abi_conformance_test.v) | the WASM ABI is **language-neutral**: a non-V module (Rust/Zig/C/WAT) honoring the contract conforms — [docs/WASM-ABI.md](docs/WASM-ABI.md), fixtures in [tests/fixtures/abi/](tests/fixtures/abi) |
+| 05 ✅ | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope + atomize + tree-shake — **implemented** ([css/](css)) |
+| 06 ✅ | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan — **implemented** ([router/](router)) |
+| 07 ✅ | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory — **implemented** ([wasm/](wasm)) |
+| 08 ✅ | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps — **implemented** ([bundle/](bundle)) |
+| 09 ✅ | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + a `static_assets`-consumable `dist/` (vanilla serves it) — **implemented** ([manifest/](manifest)) |
+| 10 ✅ | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle (served by vanilla) — **implemented** ([bundle/](bundle)) |
+| 11 ✅ | [phase_11_abi_conformance_test.v](tests/phase_11_abi_conformance_test.v) | the WASM ABI is **language-neutral**: a non-V module (Rust/Zig/C/WAT) honoring the contract conforms — **implemented** ([wasm/](wasm)), [docs/WASM-ABI.md](docs/WASM-ABI.md), fixtures in [tests/fixtures/abi/](tests/fixtures/abi) |
 
 ### Building & testing
 
-The library modules (`ast`, `parser`, `slots`, `bind`, `component`) are plain V
-under the `vcsr` module name. To resolve `import vcsr.*`, put the repo on V's
-module path (clone it as `vcsr/`, or symlink it), then run the implemented
-phases:
+All modules (`ast`, `parser`, `slots`, `bind`, `component`, `css`, `router`,
+`wasm`, `manifest`, `bundle`) are plain V under the `vcsr` module name. To
+resolve `import vcsr.*`, put the repo on V's module path (clone it as `vcsr/`,
+or symlink it). Phase 10 also serves through vanilla, so `http_server` must
+resolve too:
 
 ```sh
-ln -s "$PWD" ~/.vmodules/vcsr            # make `import vcsr.*` resolve
-v test tests/phase_04_component_model_test.v   # phases 01–04 — pass
+ln -s "$PWD" ~/.vmodules/vcsr                          # make `import vcsr.*` resolve
+ln -s ~/.vmodules/vanilla/http_server ~/.vmodules/http_server  # for phase 10 (static_assets)
+v test tests/                                          # all 11 phases — pass
 ```
 
-Phases 05–11 import not-yet-built modules (`vcsr.css`, `vcsr.wasm`, …), so
-`v test tests/` as a whole won't pass until those land — run the implemented
-phase file(s) individually. (Phase 11's `.wasm` fixtures, however, are real and
-compile today with `wat2wasm` — see [tests/fixtures/abi/README.md](tests/fixtures/abi/README.md).)
+The whole suite is green. Two external tools are used at build time by the
+bundle phases: `node` (for brotli — V has no brotli) and the prebuilt `.wasm`
+fixtures under `testdata/` (browser-ABI, committed; V can't yet emit browser
+wasm — see the status note above).
+
+### Real-browser validation
+
+Beyond the socket-free phase-10 contract, [tools/browser-smoke/](tools/browser-smoke)
+loads a built `dist/` in a real headless Chrome (Playwright) and asserts the wasm
+instantiates, mounts, and renders. Two apps:
+
+- `testdata/fixture-app` — the minimal bundle (18 checks).
+- `testdata/dashboard-app` — **"vcsr console"**, a complex C→wasm32 app on the
+  integer-handle DOM runtime: reactive state, events, computed values, list
+  rendering, async `fetch`, `localStorage`-persisted theme, conditional views,
+  and theming — exercised with real clicks/typing (14 checks; screenshots
+  committed).
+
+```sh
+cd tools/browser-smoke && npm install
+node browser-smoke.mjs        # fixture-app
+node dashboard-smoke.mjs      # dashboard-app
+```
 
 ## Contributing & engineering guidelines
 

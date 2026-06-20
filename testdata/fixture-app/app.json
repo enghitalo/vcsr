@@ -1,0 +1,13 @@
+{
+  "name": "fixture-app",
+  "routes": [
+    { "path": "/", "component": "Home", "lazy": false },
+    { "path": "/reports", "component": "Reports", "lazy": true },
+    { "path": "/*", "component": "NotFound", "lazy": false }
+  ],
+  "components": ["Home", "Reports", "NotFound", "Button", "UnreachableWidget"],
+  "styles": {
+    "Home": ".hero { padding: 2rem; display: grid; }",
+    "Reports": ".grid { display: grid; gap: 1rem; }"
+  }
+}

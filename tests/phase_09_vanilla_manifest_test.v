@@ -56,7 +56,11 @@ fn test_assets_are_content_hashed() {
 fn test_index_html_is_unhashed_entrypoint() {
 	// the SPA fallback target stays unhashed so a deploy flips by swapping it
 	assert os.exists('${dist}/index.html')
-	assert glob_one('${dist}/index.*.html') == ''
+	// no hashed `index.<hash>.html` variant: the only index*.html is the
+	// unhashed entrypoint. (Checked as a set because V's os.glob treats `*` as
+	// matching empty, so `index.*.html` also matches plain `index.html`.)
+	idx := os.glob('${dist}/index*.html') or { [] }
+	assert idx.len == 1 && idx[0].ends_with('/index.html')
 }
 
 fn test_precompressed_siblings_present() {

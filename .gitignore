@@ -8,3 +8,15 @@ dist/
 # committed so the test/demo run without a wasm toolchain installed.
 !tests/fixtures/abi/*.wasm
 !docs/examples/webapi-demo/*.wasm
+
+# Commit the testdata bundles: each app's prebuilt browser-ABI wasm (build/)
+# and its deterministic built dist/, so the suite + browser smoke run with no
+# wasm toolchain. build() regenerates dist/ idempotently from build/.
+!testdata/**/build/
+!testdata/**/dist/
+!testdata/**/build/**
+!testdata/**/dist/**
+
+# V build artifacts
+*.so
+*.o

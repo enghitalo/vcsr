@@ -65,9 +65,9 @@ fn test_no_wasi_imports_in_browser_target() {
 fn test_full_build_produces_servable_bundle() {
 	b := built()
 	assert b.has('index.html')
-	assert b.find('app.*.js')! != none
-	assert b.find('core.*.wasm')! != none
-	assert b.find('app.*.css')! != none
+	assert b.find('app.*.js')!.name != ''
+	assert b.find('core.*.wasm')!.name != ''
+	assert b.find('app.*.css')!.name != ''
 	assert b.has('manifest.json')
 }
 

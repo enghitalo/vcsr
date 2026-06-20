@@ -1,0 +1,12 @@
+{
+  "spa_fallback": "index.html",
+  "preload": ["index.html"],
+  "routes": ["/route-reports.abc999.wasm"],
+  "entries": [
+    {"name": "index.html", "content_type": "text/html; charset=utf-8", "cache": "no-cache"},
+    {"name": "app.dc3732.js", "content_type": "text/javascript; charset=utf-8", "cache": "public, max-age=31536000, immutable"},
+    {"name": "app.1eff2c.css", "content_type": "text/css; charset=utf-8", "cache": "public, max-age=31536000, immutable"},
+    {"name": "core.9f3a1c.wasm", "content_type": "application/wasm", "cache": "public, max-age=31536000, immutable"},
+    {"name": "route-reports.abc999.wasm", "content_type": "application/wasm", "cache": "public, max-age=31536000, immutable"}
+  ]
+}

@@ -23,8 +23,8 @@ fn test_assets_are_content_hashed() {
 	b := built()
 	// e.g. core.9f3a1c.wasm — the hash is part of the name
 	assert b.find('core.*.wasm')!.name.split('.').len == 3
-	assert b.find('app.*.css')! != none
-	assert b.find('app.*.js')! != none
+	assert b.find('app.*.css')!.name != ''
+	assert b.find('app.*.js')!.name != ''
 }
 
 fn test_index_html_is_not_hashed() {
@@ -51,7 +51,7 @@ fn test_source_maps_emitted() {
 fn test_lazy_routes_become_separate_wasm_files() {
 	b := built()
 	// fixture has a lazy /reports route
-	assert b.find('route-reports.*.wasm')! != none
+	assert b.find('route-reports.*.wasm')!.name != ''
 }
 
 fn test_brotli_is_smaller_than_raw() {
