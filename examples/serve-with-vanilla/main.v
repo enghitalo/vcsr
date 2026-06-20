@@ -1,19 +1,34 @@
-// Serve a built vcsr bundle with the vanilla HTTP server. Illustrative source:
-// it depends only on `vanilla`'s http_server — vcsr's job ends at emitting the
-// `dist/` directory; vanilla's `http_server.static_assets` does the serving.
-// Build a bundle into ./dist first (see README).
+// Serve a built vcsr bundle with the vanilla HTTP server. vcsr's job ends at
+// emitting the `dist/` directory; vanilla's `http_server.static_assets` serves it.
+//
+// The `vcsr build` CLI is the remaining roadmap, so this resolves a bundle to
+// serve in this order — and falls back to a real committed one so `v run` works
+// out of the box:
+//   1. $VCSR_DIST                                  (point it anywhere)
+//   2. ./dist next to this file                    (what `vcsr build` would emit)
+//   3. ../../testdata/fixture-app/dist             (committed real bundle, fallback)
 module main
 
 import http_server
 import http_server.static_assets
 import os
 
-// Built ONCE at boot from the dist/ that `vcsr build` emitted: static_assets
-// scans the bundle, precomputes a ready-to-send response for every asset and
-// every precompressed sibling, and stays immutable + lock-free afterwards.
-// Defaults already match vcsr's output: spa_fallback = 'index.html',
-// immutable_glob = '*.[hash].*', precompressed = [.br, .gz].
-const dist_dir = os.norm_path(os.join_path(os.dir(@FILE), 'dist'))
+fn resolve_dist() string {
+	here := os.dir(@FILE)
+	for c in [os.getenv('VCSR_DIST'), os.join_path(here, 'dist'),
+		os.norm_path(os.join_path(here, '..', '..', 'testdata', 'fixture-app', 'dist'))] {
+		if c != '' && os.is_dir(c) {
+			return c
+		}
+	}
+	return os.join_path(here, 'dist') // none found → static_assets.new reports it
+}
+
+// Built ONCE at boot: static_assets scans the bundle, precomputes a ready-to-send
+// response for every asset + precompressed sibling, and stays immutable +
+// lock-free afterwards. Defaults already match vcsr's output: spa_fallback =
+// 'index.html', immutable_glob = '*.[hash].*', precompressed = [.br, .gz].
+const dist_dir = resolve_dist()
 
 const assets = static_assets.new(static_assets.Config{
 	root: dist_dir
