@@ -11,6 +11,12 @@ vcsr build ../spa/src --out dist --release
 v -prod run .
 ```
 
+> The `vcsr build` CLI is the remaining roadmap, but the bundle phase already
+> emits a real, servable `dist/` today — `bundle.build('testdata/fixture-app',
+> release: true)` writes one with hashed names, `.br`/`.gz` siblings, and a
+> manifest. [tools/browser-smoke](../../tools/browser-smoke) serves exactly that
+> `dist/` (in-process, single-server, safe) and drives it in a real browser.
+
 [main.v](main.v) is the whole integration: point `static_assets.new` at the
 `dist/` that `vcsr build` wrote, then call `assets.respond_into(req, mut out)`
 from vanilla's request handler. `http_server.static_assets` handles the parts

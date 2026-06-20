@@ -157,16 +157,22 @@ vcsr serve  dist                         # reference vanilla server over the bun
 
 ## Examples
 
-See [examples/](examples) for illustrative apps (source-only until the compiler
-lands):
+See [examples/](examples) for the authoring-experience reference. The compiler
+internals (phases 01–11) are implemented; the `vcsr` CLI and runtime library
+these apps import are the remaining roadmap.
 
 - [examples/counter](examples/counter) — the minimum: one component, signals, a
-  computed value, scoped CSS.
-- [examples/spa](examples/spa) — full feature set: router + code splitting (a
-  lazy route), a shared component hoisted to core, a global store, two-way
-  binding, list rendering, async fetch.
+  computed value, scoped CSS. **Runs through the real pipeline** — its README
+  shows the actual `counter.gen.v` vcsr emits.
+- [examples/spa](examples/spa) — the target-dialect illustration: router + code
+  splitting (a lazy route), a shared component hoisted to core, a global store,
+  two-way binding, list rendering, async fetch.
 - [examples/serve-with-vanilla](examples/serve-with-vanilla) — serving a built
   `dist/` bundle with the vanilla HTTP server.
+
+For a complex app **running live in a browser** (compiled C→wasm on vcsr's DOM
+runtime), see [testdata/dashboard-app](testdata/dashboard-app) +
+[tools/browser-smoke](tools/browser-smoke).
 
 ## Serving it with vanilla
 

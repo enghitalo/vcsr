@@ -3,8 +3,15 @@
 A production-shaped single-page app exercising the full feature set, and the
 code-splitting story from [docs/DESIGN.md](../../docs/DESIGN.md).
 
+> This is the **target-dialect** illustration: it uses the full template surface
+> (mixed text + interpolation, `@for`/`@bind`/`@if`, expression handlers, child
+> props). The implemented parser/slots support a subset today — the
+> [counter](../counter) example is the one that runs end-to-end through the
+> current pipeline. The router/chunk plan this app relies on *is* implemented
+> (phase 06): `router.plan(...)` produces exactly the core/lazy split below.
+
 ```sh
-vcsr build ./src --out dist --release
+vcsr build ./src --out dist --release    # planned CLI
 # serve dist/ — see ../serve-with-vanilla
 ```
 

@@ -327,6 +327,16 @@ fn (c &Component) qualify(expr string, value_ctx bool) string {
 				out += name
 			} else if c.is_signal(name) {
 				out += '${recv}.${name}' + if value_ctx { '.get()' } else { '' }
+			} else if c.has_method(name) && !c.is_field(name) {
+				// A computed: a bare method in a value context is CALLED
+				// (`{{ doubled }}` → `c.doubled()`), unless the template already
+				// wrote the parens; in an event context it stays a method value.
+				already_called := i < expr.len && expr[i] == `(`
+				if value_ctx && !already_called {
+					out += '${recv}.${name}()'
+				} else {
+					out += '${recv}.${name}'
+				}
 			} else if c.is_field(name) || c.has_method(name) {
 				out += '${recv}.${name}'
 			} else {

@@ -1,16 +1,23 @@
 # vcsr examples
 
-> **Status: illustrative source.** The compiler is not implemented yet (see the
-> repo [README](../README.md) and [docs/DESIGN.md](../docs/DESIGN.md)). These
-> examples show the source a developer would write and the commands they would
-> run; `vcsr build` does not exist yet. They double as the human-readable
-> companion to the spec-first tests in [`../tests`](../tests).
+> **Status.** The compiler *internals* — phases 01–11 — are implemented and
+> green (parser, slot extraction, reactive binding, the component model + plain-V
+> codegen, scoped CSS, the router/chunk plan, the wasm link plan + ABI inspector,
+> bundle/manifest/e2e). What's **not** built yet is the `vcsr` CLI binary and the
+> runtime library (`vcsr` / `vcsr.runtime` — the `js` FFI substrate + signals)
+> these apps import, plus browser-wasm *emission* (V can't emit browser wasm yet
+> — see [docs/WASM-PATHS-ANALYSIS.md](../docs/WASM-PATHS-ANALYSIS.md)). So these
+> remain the **authoring-experience** reference — except [counter](counter),
+> which now runs through the real pipeline (see its README for the actual
+> generated output). The rendering model is proven live in a browser by
+> [tools/browser-smoke](../tools/browser-smoke).
 
-Each example is a self-contained app. The intended workflow for all of them:
+Each example is a self-contained app. The intended workflow (the `vcsr` CLI is
+the remaining roadmap; today the pieces run as library calls — see counter):
 
 ```sh
-vcsr build  ./src --out dist --release   # emit the CSR bundle into dist/
-vcsr watch  ./src                        # dev server with HMR + source maps
+vcsr build  ./src --out dist --release   # emit the CSR bundle into dist/ (planned CLI)
+vcsr watch  ./src                        # dev server with HMR + source maps (planned)
 # then serve dist/ with vanilla — see examples/serve-with-vanilla
 ```
 

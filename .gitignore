@@ -20,3 +20,6 @@ dist/
 # V build artifacts
 *.so
 *.o
+
+# vcsr-generated component code (emitted from name.v/.html/.css triplets)
+*.gen.v
