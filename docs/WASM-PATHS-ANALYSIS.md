@@ -2,19 +2,21 @@
 
 What can actually reach a browser as WebAssembly, by which route, and what each
 route can and cannot do — **measured empirically**, not quoted from old blog
-posts. Every ✅/❌ below is a real compile run on this machine on **2026-06-13**;
-the reproduction commands are in §7.
+posts. Every ✅/❌ below is a real compile run on this machine on **2026-06-13**
+(with the installed clang **19.1.5**; the decisive `externref` results in §3 were
+re-verified on **2026-06-21** on the same toolchain). The reproduction commands
+are in §7.
 
-## Toolchain under test (latest available)
+## Toolchain under test (as installed on this machine)
 
-| Tool | Version | Notes |
-|---|---|---|
-| V | `0.5.1 130caaf` | master HEAD of 2026-06-13, **0 commits behind** origin |
-| clang / wasi-sdk | **22.1.0** (`wasi-sdk-33`, LLVM commit `4434dabb`) | latest wasi-sdk release (2026-04-30); targets `wasm32`/`wasm64` |
-| WABT (`wat2wasm`/`wasm-validate`) | 1.0.34 | reference-types on by default; lags on relaxed-SIMD/memory64 |
-| Binaryen (`wasm-opt`) | 108 | bundled in wasi-sdk's clang driver |
-| `wasm-tools` | 1.226.0 | validates all proposals; component tooling |
-| Node | 26.1.0 | V8; tracks Chrome |
+| Tool                              | Version                                             | Notes                                                                 |
+| --------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------- |
+| V                                 | `0.5.1 c0624b2`                                     | master HEAD (commit of 2026-06-20)                                    |
+| clang / wasi-sdk                  | **19.1.5** (`wasi-sdk 25.0`, LLVM commit `ab4b5a2d`) | targets `wasm32`/`wasm64`. (Upstream wasi-sdk has newer LLVM 20/22 builds; the externref limit below is unchanged on those — see §3.) |
+| WABT (`wat2wasm`/`wasm-validate`) | 1.0.34                                              | reference-types on by default; lags on relaxed-SIMD/memory64          |
+| Binaryen (`wasm-opt`)             | 108                                                 | bundled in wasi-sdk's clang driver                                    |
+| `wasm-tools`                      | 1.226.0                                            | validates all proposals; component tooling                      |
+| Node                              | 26.1.0                                             | V8; tracks Chrome                                               |
 
 **Browser baseline:** WebAssembly **3.0 was ratified by the W3C in Sept 2025**
 (GC, Memory64, multi-memory, typed refs, tail calls, final exception handling,
@@ -42,19 +44,19 @@ because Path 2 goes through C, Path 1's reach is available inside Path 2 via
 A pure-V wasm builder (no C compiler). Default output is **WASI**; `-os browser`
 exists for DOM demos. Measured feature coverage:
 
-| V feature | `-b wasm` | error if it fails |
-|---|---|---|
-| int / f64 arithmetic, function export | ✅ | — |
-| `println` (→ WASI `fd_write`) | ✅ | — |
-| fixed arrays `[N]T`, `match`, `for x in a..b`, string `+` | ✅ | — |
-| **named structs** | ✅ | (single-letter names are reserved for generics — unrelated) |
-| **dynamic arrays `[]T`** | ❌ | `wasm backend does not support dynamic arrays` (`gen.v:943`) / `get_wasm_type: unreachable type '[]int'` |
-| **maps** | ❌ | `get_wasm_type: unreachable type 'map[string]int'` |
-| **closures** | ❌ | `get_wasm_type: unreachable type 'anon_fn…'` |
-| **interfaces** | ❌ | `toplevel_stmt(): unhandled node: InterfaceDecl` |
-| **sum types** | ❌ | `get_wasm_type: unreachable type 'main.Num' SumType` |
-| **generics** | ❌ | `get_wasm_type: unreachable type 'T'` |
-| `-os browser` DOM via `fn JS.*(ptr,len)` | ⚠️ | the model is `(ptr,len)` through linear memory, **not externref**; and the bundled official example `change_color_by_id` **crashes the compiler** on today's master: `V panic: called function eprintln does not exist` (in `v_stable_sort`) |
+| V feature                                                 | `-b wasm` | error if it fails                                                                                                                                                                                                                            |
+| --------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| int / f64 arithmetic, function export                     | ✅        | —                                                                                                                                                                                                                                            |
+| `println` (→ WASI `fd_write`)                             | ✅        | —                                                                                                                                                                                                                                            |
+| fixed arrays `[N]T`, `match`, `for x in a..b`, string `+` | ✅        | —                                                                                                                                                                                                                                            |
+| **named structs**                                         | ✅        | (single-letter names are reserved for generics — unrelated)                                                                                                                                                                                  |
+| **dynamic arrays `[]T`**                                  | ❌        | `wasm backend does not support dynamic arrays` (`gen.v:943`) / `get_wasm_type: unreachable type '[]int'`                                                                                                                                     |
+| **maps**                                                  | ❌        | `get_wasm_type: unreachable type 'map[string]int'`                                                                                                                                                                                           |
+| **closures**                                              | ❌        | `get_wasm_type: unreachable type 'anon_fn…'`                                                                                                                                                                                                 |
+| **interfaces**                                            | ❌        | `toplevel_stmt(): unhandled node: InterfaceDecl`                                                                                                                                                                                             |
+| **sum types**                                             | ❌        | `get_wasm_type: unreachable type 'main.Num' SumType`                                                                                                                                                                                         |
+| **generics**                                              | ❌        | `get_wasm_type: unreachable type 'T'`                                                                                                                                                                                                        |
+| `-os browser` DOM via `fn JS.*(ptr,len)`                  | ⚠️        | the model is `(ptr,len)` through linear memory, **not externref**; and the bundled official example `change_color_by_id` **crashes the compiler** on today's master: `V panic: called function eprintln does not exist` (in `v_stable_sort`) |
 
 **Verdict.** Usable for hand-written numeric/leaf functions. It **cannot compile
 a real component framework** — the vcsr runtime (signals, slot tables, router,
@@ -74,16 +76,16 @@ step is the reactor-model link from the [concept example](../../concept-examples
 
 ### 2.1 The whole V language compiles — and validates
 
-| V feature exercised | result | size (uncompressed) |
-|---|---|---|
-| dynamic arrays + `.sort()` with a closure comparator | ✅ validate=ok | 72 KB |
-| maps | ✅ | 79 KB |
-| UTF-8 strings + interpolation | ✅ | 64 KB |
-| structs in a dynamic array | ✅ | 64 KB |
-| closures (capturing) | ✅ | 69 KB |
-| generics | ✅ | 65 KB |
-| interfaces (dynamic dispatch) | ✅ | 64 KB |
-| sum types + `match` | ✅ | 65 KB |
+| V feature exercised                                  | result         | size (uncompressed) |
+| ---------------------------------------------------- | -------------- | ------------------- |
+| dynamic arrays + `.sort()` with a closure comparator | ✅ validate=ok | 72 KB               |
+| maps                                                 | ✅             | 79 KB               |
+| UTF-8 strings + interpolation                        | ✅             | 64 KB               |
+| structs in a dynamic array                           | ✅             | 64 KB               |
+| closures (capturing)                                 | ✅             | 69 KB               |
+| generics                                             | ✅             | 65 KB               |
+| interfaces (dynamic dispatch)                        | ✅             | 64 KB               |
+| sum types + `match`                                  | ✅             | 65 KB               |
 
 Every one passes `wasm-validate`. The floor is ~64 KB (V runtime + libc),
 uncompressed — brotli cuts that sharply, and it's a one-time core cost.
@@ -105,7 +107,7 @@ C need their C sources added to the clang step.
 
 ### 2.4 The C-in-V bridge — Path 1's reach, from V
 
-Because Path 2 *is* a C compile, anything C/clang can do is reachable from V via
+Because Path 2 _is_ a C compile, anything C/clang can do is reachable from V via
 `C.`-interop. Measured: a V program calling `C.csum` **and** a clang
 `__builtin_popcount`, all riding through to wasm — **64,227 B, ✅**:
 
@@ -125,41 +127,41 @@ externref persistence — see §3).
 
 ---
 
-## §3. PATH 1 — pure clang-22, the wasm proposal ceiling
+## §3. PATH 1 — pure clang-19, the wasm proposal ceiling
 
-What the *target* can emit with LLVM 22, independent of language. This is the
+What the _target_ can emit with LLVM 19, independent of language. This is the
 upper bound Path 2 inherits through the C-in-V bridge.
 
-| WASM proposal | clang-22 | how |
-|---|---|---|
-| baseline (i32/i64/f32/f64, linear memory) | ✅ | default |
-| sign-extension ops | ✅ | `-msign-ext` |
-| non-trapping float→int | ✅ | `-mnontrapping-fptoint` |
-| bulk memory | ✅ | `-mbulk-memory` |
-| multi-value returns | ✅ | `-mmultivalue -Xclang -target-abi -Xclang experimental-mv` |
-| fixed-width SIMD (v128) | ✅ | `-msimd128` |
-| tail calls | ✅ | `-mtail-call` + `musttail` |
-| **threads** (atomics + **shared memory**) | ✅ | `-matomics -mbulk-memory -pthread -Wl,--shared-memory` (browser also needs COOP/COEP) |
-| extended const expressions | ✅ | `-mextended-const` |
-| **exception handling** (`-fwasm-exceptions`) | ✅ | C++ `try/catch` lowered to EH (742 B) |
-| Memory64 (`wasm64`) | ✅ | `--target=wasm64` (WABT 1.0.34 too old to validate; `wasm-tools` OK) |
-| reactor exec-model (`_initialize`) | ✅ | `-mexec-model=reactor` |
-| relaxed SIMD | ⚠️ | LLVM 22 emits it, but wasi-sdk's bundled Binaryen rejects the opcodes (`invalid code after SIMD prefix: 261`); niche + Safari doesn't ship it anyway |
-| **reference types / `externref`** | ⚠️ **constrained** | see below — the decisive limit |
+| WASM proposal                                | clang-19           | how                                                                                                                                                  |
+| -------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| baseline (i32/i64/f32/f64, linear memory)    | ✅                 | default                                                                                                                                              |
+| sign-extension ops                           | ✅                 | `-msign-ext`                                                                                                                                         |
+| non-trapping float→int                       | ✅                 | `-mnontrapping-fptoint`                                                                                                                              |
+| bulk memory                                  | ✅                 | `-mbulk-memory`                                                                                                                                      |
+| multi-value returns                          | ✅                 | `-mmultivalue -Xclang -target-abi -Xclang experimental-mv`                                                                                           |
+| fixed-width SIMD (v128)                      | ✅                 | `-msimd128`                                                                                                                                          |
+| tail calls                                   | ✅                 | `-mtail-call` + `musttail`                                                                                                                           |
+| **threads** (atomics + **shared memory**)    | ✅                 | `-matomics -mbulk-memory -pthread -Wl,--shared-memory` (browser also needs COOP/COEP)                                                                |
+| extended const expressions                   | ✅                 | `-mextended-const`                                                                                                                                   |
+| **exception handling** (`-fwasm-exceptions`) | ✅                 | C++ `try/catch` lowered to EH (742 B)                                                                                                                |
+| Memory64 (`wasm64`)                          | ✅                 | `--target=wasm64` (WABT 1.0.34 too old to validate; `wasm-tools` OK)                                                                                 |
+| reactor exec-model (`_initialize`)           | ✅                 | `-mexec-model=reactor`                                                                                                                               |
+| relaxed SIMD                                 | ⚠️                 | LLVM 19 emits it, but wasi-sdk's bundled Binaryen rejects the opcodes (`invalid code after SIMD prefix: 261`); niche + Safari doesn't ship it anyway |
+| **reference types / `externref`**            | ⚠️ **constrained** | see below — the decisive limit                                                                                                                       |
 
-### externref on clang-22 — works only in transit
+### externref on clang-19 — works only in transit
 
 This is the constraint that dictates the whole DOM strategy. Measured per
 scenario:
 
-| externref usage | clang-22 |
-|---|---|
-| function param / local / return value | ✅ |
-| `__builtin_wasm_ref_null_extern()` | ✅ |
-| a global, *declared* but unused | ✅ |
-| a global, **stored to** | ❌ `fatal error: error in backend: Cannot select: … store` — **LLVM [#141011](https://github.com/llvm/llvm-project/issues/141011) still live in LLVM 22** |
-| a field in a struct | ❌ `field has sizeless type` (externref can't live in linear memory, by design) |
-| a C array / table | ❌ `only zero-length WebAssembly tables are currently supported` |
+| externref usage                       | clang-19                                                                                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| function param / local / return value | ✅                                                                                                                                                        |
+| `__builtin_wasm_ref_null_extern()`    | ✅                                                                                                                                                        |
+| a global, _declared_ but unused       | ✅                                                                                                                                                        |
+| a global, **stored to**               | ❌ `fatal error: error in backend: Cannot select: … store` — **LLVM [#141011](https://github.com/llvm/llvm-project/issues/141011) still live in LLVM 19** |
+| a field in a struct                   | ❌ `field has sizeless type` (externref can't live in linear memory, by design)                                                                           |
+| a C array / table                     | ❌ `only zero-length WebAssembly tables are currently supported`                                                                                          |
 
 So from C/clang (and therefore from V-via-clang) you can **pass** a DOM node
 across a boundary as `externref`, but you **cannot persist** it — not in a
@@ -177,7 +179,7 @@ host-side by tooling**; **no browser runs a component natively** (confirmed in
 the 2026 browser survey, §8). For the browser it's a build-time convention, not
 a runtime target.
 
-**Verdict.** clang-22 can emit essentially the entire browser-relevant proposal
+**Verdict.** clang-19 can emit essentially the entire browser-relevant proposal
 set — SIMD, threads, exceptions, tail calls, multi-value, memory64, reference
 types — and all of it is reachable from V through the C-in-V bridge. The lone
 hard wall is **persisting `externref`**, which no toolchain gives you from C
@@ -185,51 +187,51 @@ today.
 
 ---
 
-## §4. Master matrix: browser *need* × path × browser support
+## §4. Master matrix: browser _need_ × path × browser support
 
 For each capability a browser app might want: which path delivers it, and is the
 browser ready (WASM 3.0 baseline; "Safari floor" is the binding constraint).
 
-| Browser need | Path 3 (V native) | Path 2 (V→clang) | Path 1 (pure clang) | Browser support (verdict) |
-|---|---|---|---|---|
-| Run real app logic (arrays/maps/closures/interfaces) | ❌ | ✅ | n/a (lang) | ✅ universal |
-| `println`/logging | ✅ (WASI) | ✅ (WASI shim) | ✅ | ✅ via JS shim |
-| Call DOM / JS | ⚠️ `(ptr,len)` only | ✅ JS glue `(ptr,len)` | ✅ + transient externref | ✅ (always via JS) |
-| **Persist** DOM node handles | ❌ | ✅ via **handle table** | ❌ externref can't persist | handle-table: ✅ everywhere; externref: ✅ Chrome96/FF79/Safari15 but **not storable from C** |
-| Manual heap (malloc/free) | partial | ✅ | ✅ | ✅ |
-| SIMD (v128) | ❌ | ✅ (C-in-V) | ✅ `-msimd128` | ✅ Chrome91/FF89/**Safari16.4** |
-| Threads (shared memory + atomics) | ❌ | ✅ (C-in-V) | ✅ | ✅ engines universal — **but needs COOP/COEP cross-origin isolation** |
-| Exception handling | ❌ | ✅ (C++ in V) | ✅ `-fwasm-exceptions` | ✅ standardized exnref: Chrome137/FF131/**Safari18.4** (2025) |
-| Tail calls | ❌ | ✅ (C-in-V) | ✅ `-mtail-call` | ✅ since Safari 18.2 (late 2024) |
-| Multi-value returns | ❌ | ✅ | ✅ | ✅ universal |
-| Memory64 | ❌ | ✅ (`wasm64`) | ✅ | ⚠️ Chrome133/FF134, **not Safari** — feature-detect |
-| WasmGC (managed heap) | ❌ | ❌ (V uses linear memory) | ❌ (clang uses linear memory) | ✅ Chrome119/FF120/Safari18.2 — but no C/V producer |
-| Dynamic linking (MAIN/SIDE chunks) | ❌ | ⚠️ manual `wasm-ld -shared` | ⚠️ manual | host-side; emulated by the JS loader |
-| Component Model | ❌ | ⚠️ host-side tooling only | ⚠️ tooling only | ❌ no browser runs components natively |
-| `instantiateStreaming` | ✅ | ✅ | ✅ | ✅ **requires `Content-Type: application/wasm`** (vanilla `static_assets` sets it) |
+| Browser need                                         | Path 3 (V native)   | Path 2 (V→clang)            | Path 1 (pure clang)           | Browser support (verdict)                                                                     |
+| ---------------------------------------------------- | ------------------- | --------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------- |
+| Run real app logic (arrays/maps/closures/interfaces) | ❌                  | ✅                          | n/a (lang)                    | ✅ universal                                                                                  |
+| `println`/logging                                    | ✅ (WASI)           | ✅ (WASI shim)              | ✅                            | ✅ via JS shim                                                                                |
+| Call DOM / JS                                        | ⚠️ `(ptr,len)` only | ✅ JS glue `(ptr,len)`      | ✅ + transient externref      | ✅ (always via JS)                                                                            |
+| **Persist** DOM node handles                         | ❌                  | ✅ via **handle table**     | ❌ externref can't persist    | handle-table: ✅ everywhere; externref: ✅ Chrome96/FF79/Safari15 but **not storable from C** |
+| Manual heap (malloc/free)                            | partial             | ✅                          | ✅                            | ✅                                                                                            |
+| SIMD (v128)                                          | ❌                  | ✅ (C-in-V)                 | ✅ `-msimd128`                | ✅ Chrome91/FF89/**Safari16.4**                                                               |
+| Threads (shared memory + atomics)                    | ❌                  | ✅ (C-in-V)                 | ✅                            | ✅ engines universal — **but needs COOP/COEP cross-origin isolation**                         |
+| Exception handling                                   | ❌                  | ✅ (C++ in V)               | ✅ `-fwasm-exceptions`        | ✅ standardized exnref: Chrome137/FF131/**Safari18.4** (2025)                                 |
+| Tail calls                                           | ❌                  | ✅ (C-in-V)                 | ✅ `-mtail-call`              | ✅ since Safari 18.2 (late 2024)                                                              |
+| Multi-value returns                                  | ❌                  | ✅                          | ✅                            | ✅ universal                                                                                  |
+| Memory64                                             | ❌                  | ✅ (`wasm64`)               | ✅                            | ⚠️ Chrome133/FF134, **not Safari** — feature-detect                                           |
+| WasmGC (managed heap)                                | ❌                  | ❌ (V uses linear memory)   | ❌ (clang uses linear memory) | ✅ Chrome119/FF120/Safari18.2 — but no C/V producer                                           |
+| Dynamic linking (MAIN/SIDE chunks)                   | ❌                  | ⚠️ manual `wasm-ld -shared` | ⚠️ manual                     | host-side; emulated by the JS loader                                                          |
+| Component Model                                      | ❌                  | ⚠️ host-side tooling only   | ⚠️ tooling only               | ❌ no browser runs components natively                                                        |
+| `instantiateStreaming`                               | ✅                  | ✅                          | ✅                            | ✅ **requires `Content-Type: application/wasm`** (vanilla `static_assets` sets it)            |
 
 ---
 
 ## §5. Browser resources / Web APIs — `fetch`, `localStorage`, and the async wrinkle
 
-The proposal matrix (§3) is about *what wasm bytecode can express*. A real app
-also needs *browser resources*: `fetch`, `localStorage`, `WebSocket`, timers,
+The proposal matrix (§3) is about _what wasm bytecode can express_. A real app
+also needs _browser resources_: `fetch`, `localStorage`, `WebSocket`, timers,
 History (for the router), `crypto`, IndexedDB. **None of these have any
 wasm-level support** — exactly like the DOM, each is a JS-host capability reached
-*only* by importing a JS function and marshalling arguments/results across the
+_only_ by importing a JS function and marshalling arguments/results across the
 boundary. The single axis that actually differs between them is **synchronous vs
 asynchronous.**
 
-| Resource | Nature | Mechanism | Caveat |
-|---|---|---|---|
-| `localStorage` / `sessionStorage` | **sync**, string | import `ls_get(kptr,klen)->(vptr,vlen)` / `ls_set(…)`; strings via linear memory | none — works everywhere |
-| `crypto.getRandomValues` | sync | import writes bytes into memory | already in the concept `wasm.js` (`random_get`) |
-| `console`, `URL`, read `location` | sync | import `(ptr,len)` | none |
-| History `pushState` (SPA router) | sync | import calls `history.pushState` | none |
-| **`fetch`** | **async** (Promise) | callback or JSPI — see below | the only hard one |
-| `WebSocket`, `EventSource`, DOM events | async/events | callback registered in the shared table | — |
-| `setTimeout` / `requestAnimationFrame` | async | callback in the table | — |
-| IndexedDB | async | callback | — |
+| Resource                               | Nature              | Mechanism                                                                        | Caveat                                          |
+| -------------------------------------- | ------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `localStorage` / `sessionStorage`      | **sync**, string    | import `ls_get(kptr,klen)->(vptr,vlen)` / `ls_set(…)`; strings via linear memory | none — works everywhere                         |
+| `crypto.getRandomValues`               | sync                | import writes bytes into memory                                                  | already in the concept `wasm.js` (`random_get`) |
+| `console`, `URL`, read `location`      | sync                | import `(ptr,len)`                                                               | none                                            |
+| History `pushState` (SPA router)       | sync                | import calls `history.pushState`                                                 | none                                            |
+| **`fetch`**                            | **async** (Promise) | callback or JSPI — see below                                                     | the only hard one                               |
+| `WebSocket`, `EventSource`, DOM events | async/events        | callback registered in the shared table                                          | —                                               |
+| `setTimeout` / `requestAnimationFrame` | async               | callback in the table                                                            | —                                               |
+| IndexedDB                              | async               | callback                                                                         | —                                               |
 
 **Sync resources are trivial** — the same `(ptr,len)` marshalling as a DOM text
 write. **Async is the real design point**, because wasm has no native `await`.
@@ -264,7 +266,7 @@ real loopback `fetch` plus `localStorage`, in
 the wasm callback via `table[1]`. **No JSPI involved.**
 
 **For vcsr:** the `js` FFI substrate the [DESIGN.md](DESIGN.md) defines
-(`get`/`set`/`call`/`new` over `JsValue`) already reaches *all* of these
+(`get`/`set`/`call`/`new` over `JsValue`) already reaches _all_ of these
 uniformly — `global().get('localStorage').call('getItem', …)`,
 `global().call('fetch', …)`. No per-resource API is needed; what's needed is the
 substrate, the integer handle table (since `externref` can't persist — §3), and
@@ -306,7 +308,7 @@ The language-neutral contract these conclusions feed into is
 printf 'fn main(){ mut a := []int{} a << 1 println(a.len.str()) }' > t.v
 v -b wasm -o t.wasm t.v            # -> get_wasm_type: unreachable type '[]int'
 
-# PATH 2 — via clang (expect full language to pass); WS = unpacked wasi-sdk-33
+# PATH 2 — via clang (expect full language to pass); WS = unpacked wasi-sdk 25.0
 v -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler -cc clang -gc none -o t.c t.v
 "$WS/bin/clang" --sysroot="$WS/share/wasi-sysroot" --target=wasm32-wasip1 \
   -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -O3 \
