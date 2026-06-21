@@ -243,7 +243,7 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 | 09 ✅ | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + a `static_assets`-consumable `dist/` (vanilla serves it) — **implemented** ([manifest/](manifest)) |
 | 10 ✅ | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle (served by vanilla) — **implemented** ([bundle/](bundle)) |
 | 11 ✅ | [phase_11_abi_conformance_test.v](tests/phase_11_abi_conformance_test.v) | the WASM ABI is **language-neutral**: a non-V module (Rust/Zig/C/WAT) honoring the contract conforms — **implemented** ([wasm/](wasm)), [docs/WASM-ABI.md](docs/WASM-ABI.md), fixtures in [tests/fixtures/abi/](tests/fixtures/abi) |
-| 12 🚧 | [phase_12_runtime_signals_test.v](tests/phase_12_runtime_signals_test.v) | the **runtime library** the generated code imports — **in progress**. Slice 1 (the reactive core: `Signal`/`effect`, [signal.v](signal.v)) is implemented; the `js` FFI substrate, the Template/bind engine, and the app/router runtime are next. This is what closes the loop from a triplet to a running app. |
+| 12 🚧 | [phase_12_runtime_signals_test.v](tests/phase_12_runtime_signals_test.v) · [phase_13_runtime_ffi_test.v](tests/phase_13_runtime_ffi_test.v) | the **runtime library** the generated code imports — **in progress**. Slice 1 (reactive core: `Signal`/`effect`, [signal.v](signal.v)) ✅ and slice 2 (`js` FFI substrate: `JsValue` get/set/call/new + a mock host, [js_ffi.v](js_ffi.v)) ✅ are done; the Template/bind engine and the app/router runtime are next. This is what closes the loop from a triplet to a running app. |
 
 ### Building & testing
 
