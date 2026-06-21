@@ -252,10 +252,12 @@ ln -s /path/to/vanilla ~/.vmodules/vanilla             # for phase 10 (vanilla.h
 v test tests/                                          # all 11 phases — pass
 ```
 
-The whole suite is green. Two external tools are used at build time by the
-bundle phases: `node` (for brotli — V has no brotli) and the prebuilt `.wasm`
-fixtures under `testdata/` (browser-ABI, committed; V can't yet emit browser
-wasm — see the status note above).
+The whole suite is green. Two things the bundle phases rely on: `node` (for
+brotli — V has no brotli) and the prebuilt browser-ABI `.wasm` under
+`testdata/*/build/` (committed **inputs**, authored with clang/wat2wasm; V can't
+yet emit browser wasm — see the status note above). The bundled `dist/` is
+vcsr-generated output and is **not** committed — the tests regenerate it (phase
+09 builds it in `testsuite_begin`; 08/10 build it directly).
 
 ### Real-browser validation
 

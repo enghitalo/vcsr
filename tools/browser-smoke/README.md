@@ -22,20 +22,23 @@ Two harnesses:
 
 ## Run
 
+A `dist/` is vcsr-generated output and isn't committed, so build one first
+(`vcsr build <app>`, or just run `v test tests/` — phases 08/09/10 build the
+fixture's `dist/`). Then:
+
 ```sh
 cd tools/browser-smoke
 npm install                 # installs Playwright (the run uses your system Chrome)
 node browser-smoke.mjs      # serves ../../testdata/fixture-app/dist, drives Chrome, asserts, screenshots
+node dashboard-smoke.mjs    # the complex dashboard app (vcsr build testdata/dashboard-app first)
 ```
 
-Exit code `0` means all checks passed. Screenshots land in `screenshots/`.
+Exit code `0` means all checks passed. Screenshots land in `screenshots/`. Each
+harness prints a clear "no bundle — build first" message if its `dist/` is absent.
 
 - `VCSR_DIST=/abs/path/to/dist` — point it at a different built bundle.
 - `CHROME_BIN=/usr/bin/chromium` — choose the browser binary. If none is found
   it falls back to Playwright's bundled Chromium (`npx playwright install chromium`).
-
-Build the fixture bundle first if `dist/` is missing — anything that calls
-`bundle.build('testdata/fixture-app', release: true)`.
 
 ## What it checks (18)
 

@@ -16,9 +16,17 @@
 module main
 
 import vcsr.manifest
+import vcsr.bundle
 import os
 
 const dist = 'testdata/fixture-app/dist'
+
+// Build the fixture bundle before the assertions, so this phase is self-contained
+// and needs no committed dist/ (vcsr-generated output isn't checked in — it's
+// regenerated from the prebuilt build/ wasm inputs).
+fn testsuite_begin() {
+	bundle.build('testdata/fixture-app', release: true) or { panic(err) }
+}
 
 // --- manifest: vcsr's build record ------------------------------------------
 
