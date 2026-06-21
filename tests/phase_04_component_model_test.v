@@ -80,7 +80,7 @@ fn test_missing_html_file_is_error() {
 fn test_emits_gen_v_with_view_and_style() {
 	gen := counter().codegen()!
 	assert gen.filename == 'counter.gen.v'
-	assert gen.source.contains('fn (mut c Counter) view() vcsr.View')
+	assert gen.source.contains('fn (mut c Counter) view() runtime.View')
 	assert gen.source.contains('fn (c Counter) style() string')
 }
 

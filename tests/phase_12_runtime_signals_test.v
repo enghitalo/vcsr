@@ -10,7 +10,7 @@
 //   v -enable-globals test tests/phase_12_runtime_signals_test.v
 module main
 
-import vcsr { effect, signal }
+import vcsr { effect, effect_handle, signal }
 
 fn test_get_set_update() {
 	mut s := signal(10)
@@ -67,4 +67,46 @@ fn test_string_signal() {
 	mut name := signal('a')
 	name.set('b')
 	assert name.get() == 'b'
+}
+
+// A branchy effect (think an @if-guarded slot) must drop a dependency it stops
+// reading — otherwise it re-fires on writes it no longer cares about.
+fn test_stale_dependencies_are_dropped() {
+	mut cond := signal(true)
+	mut a := signal(1)
+	mut runs := signal(0)
+	effect(fn [mut cond, mut a, mut runs] () {
+		if cond.get() {
+			a.get() // a dependency only while cond is true
+		}
+		runs.update(fn (x int) int {
+			return x + 1
+		})
+	})
+	assert runs.peek() == 1
+	a.set(2) // read this run → re-runs
+	assert runs.peek() == 2
+	cond.set(false) // re-runs; this run no longer reads `a`
+	assert runs.peek() == 3
+	a.set(3) // `a` is no longer a dependency → must NOT re-run
+	assert runs.peek() == 3
+}
+
+// An owned effect can be disposed: after dispose it detaches and never re-runs
+// (this is how a component instance releases its slot bindings on unmount).
+fn test_dispose_detaches_effect() {
+	mut s := signal(0)
+	mut runs := signal(0)
+	mut e := effect_handle(fn [mut s, mut runs] () {
+		s.get()
+		runs.update(fn (x int) int {
+			return x + 1
+		})
+	})
+	assert runs.peek() == 1
+	s.set(1)
+	assert runs.peek() == 2
+	e.dispose()
+	s.set(2) // disposed → must NOT re-run
+	assert runs.peek() == 2
 }

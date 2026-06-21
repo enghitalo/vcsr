@@ -235,7 +235,7 @@ pub fn (c &Component) codegen() !Generated {
 	b.write_string('}\n\n')
 
 	// view(): clone the template once, wire each slot to the reactive runtime
-	b.write_string('pub fn (mut ${recv} ${c.name}) view() vcsr.View {\n')
+	b.write_string('pub fn (mut ${recv} ${c.name}) view() runtime.View {\n')
 	b.write_string('\tmut ins := __${lower}_tpl.instance()\n')
 	for i, s in c.tmpl.slots {
 		c.emit_bind(mut b, recv, i, s)
