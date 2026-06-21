@@ -3,10 +3,11 @@
 // The pipeline (phases 01–11) lives in libraries; this binary wires them into
 // commands a developer runs:
 //
-//   vcsr gen   <triplet>          analyze a .v/.html/.css triplet → write <name>.gen.v
-//   vcsr wasm  <src> [--out DIR]  compile a component src dir → core.wasm (v -cc clang)
-//   vcsr build <app> [--release]  bundle an app dir → <app>/dist (hashing, br/gz, manifest)
-//   vcsr serve <dist> [--port N]  serve a built dist/ with the vanilla HTTP server
+//   vcsr gen    <triplet>         analyze a .v/.html/.css triplet → write <name>.gen.v
+//   vcsr wasm   <src> [--out DIR] compile a component src dir → core.wasm (v -cc clang)
+//   vcsr build  <app> [--release] bundle an app dir → <app>/dist (hashing, br/gz, manifest)
+//   vcsr serve  <dist> [--port N] serve a built dist/ with the vanilla HTTP server
+//   vcsr update [--rebuild]       git pull + rebuild + reinstall this binary
 //   vcsr version | help
 //
 // `wasm` emits a browser-ABI core.wasm from a V component via Path 2 (v -cc clang
@@ -38,6 +39,9 @@ fn main() {
 		}
 		'wasm' {
 			do_wasm(rest) or { fail(err) }
+		}
+		'update' {
+			do_update(rest) or { fail(err) }
 		}
 		'build' {
 			do_build(rest) or { fail(err) }
@@ -143,6 +147,63 @@ fn run_step(label string, cmd string) ! {
 	if res.exit_code != 0 {
 		return error('wasm: ${label} step failed:\n${res.output}')
 	}
+}
+
+// --- update: pull latest from GitHub, rebuild, reinstall the running binary --
+//
+// vcsr is built from source, so "update" = fast-forward the source repo to
+// origin, then `v -prod` rebuild it over the running executable. `--rebuild`
+// skips the git step (rebuild+install the current source — handy after local
+// edits). The repo path is baked at compile time (@FILE); if it has moved,
+// re-clone git@github.com:enghitalo/vcsr.git.
+fn do_update(rest []string) ! {
+	_, flags := parse_args(rest)
+	repo := repo_root()
+	exe := os.executable()
+
+	if 'rebuild' !in flags {
+		if !os.is_dir(os.join_path(repo, '.git')) {
+			return error('update: vcsr source repo not found at ${repo}\n  clone git@github.com:enghitalo/vcsr.git there, or pass --rebuild to rebuild the current source')
+		}
+		branch := git_out(repo, 'rev-parse --abbrev-ref HEAD')
+		before := git_out(repo, 'rev-parse --short HEAD')
+		println('vcsr: fetching origin/${branch} …')
+		pull := os.execute('git -C ${os.quoted_path(repo)} pull --ff-only origin ${branch}')
+		if pull.exit_code != 0 {
+			return error('update: git pull --ff-only failed:\n${pull.output.trim_space()}\n  reconcile local changes (or push them), or pass --rebuild to just rebuild the current source')
+		}
+		after := git_out(repo, 'rev-parse --short HEAD')
+		if before == after {
+			println('  already on the latest origin/${branch} (${after}); rebuilding to refresh the binary…')
+		} else {
+			println('  ${before} → ${after}')
+		}
+	}
+
+	// build to a temp beside the target, then rename over it — a running binary
+	// can't be written in place (ETXTBSY), but rename(2) swaps it atomically.
+	tmp := exe + '.new'
+	cmddir := os.join_path(repo, 'cmd', 'vcsr')
+	println('vcsr: building ${exe} …')
+	run_step('build',
+		'${os.quoted_path(@VEXE)} -prod -o ${os.quoted_path(tmp)} ${os.quoted_path(cmddir)}')!
+	os.mv(tmp, exe) or {
+		os.rm(tmp) or {}
+		return error('update: built ok but failed to install to ${exe}: ${err.msg()}')
+	}
+	println('✓ vcsr ${version} installed at ${exe}  (${git_out(repo, 'rev-parse --short HEAD')})')
+}
+
+// repo_root is the vcsr source tree this binary was built from (cmd/vcsr/vcsr.v
+// → up three). Baked at compile time via @FILE.
+fn repo_root() string {
+	return os.dir(os.dir(os.dir(@FILE)))
+}
+
+// git_out runs `git -C repo <args>` and returns trimmed stdout (or '?' on error).
+fn git_out(repo string, args string) string {
+	r := os.execute('git -C ${os.quoted_path(repo)} ${args}')
+	return if r.exit_code == 0 { r.output.trim_space() } else { '?' }
 }
 
 // --- build: app dir → app/dist ----------------------------------------------
@@ -272,17 +333,19 @@ fn usage() {
 	println('vcsr ${version} — CSR→WASM compiler for V (phases 01–11 implemented)
 
 USAGE:
-  vcsr gen   <triplet>            generate <name>.gen.v from a .v/.html/.css triplet
-  vcsr wasm  <src> [--out DIR]    compile a component src dir → core.wasm (v -cc clang)
-  vcsr build <app> [--release]    bundle an app dir → <app>/dist (hashing, br/gz, manifest)
-  vcsr serve <dist> [--port N]    serve a built dist/ with the vanilla HTTP server
+  vcsr gen    <triplet>           generate <name>.gen.v from a .v/.html/.css triplet
+  vcsr wasm   <src> [--out DIR]   compile a component src dir → core.wasm (v -cc clang)
+  vcsr build  <app> [--release]   bundle an app dir → <app>/dist (hashing, br/gz, manifest)
+  vcsr serve  <dist> [--port N]   serve a built dist/ with the vanilla HTTP server
+  vcsr update [--rebuild]         git pull + rebuild + reinstall this binary
   vcsr version | help
 
 EXAMPLES:
-  vcsr gen   examples/counter/src/counter
-  vcsr wasm  examples/counter/src               # → examples/counter/wasm/core.wasm
-  vcsr build testdata/dashboard-app --release
-  vcsr serve testdata/dashboard-app/dist --port 3000
+  vcsr gen    examples/counter/src/counter
+  vcsr wasm   examples/counter/src              # → examples/counter/wasm/core.wasm
+  vcsr build  testdata/dashboard-app --release
+  vcsr serve  testdata/dashboard-app/dist --port 3000
+  vcsr update                                   # pull latest from GitHub + reinstall
 
 NOTE: `wasm` compiles a V component to a browser-ABI core.wasm via Path 2
 (v -cc clang + wasi-sdk; set WASI_SDK), using the runtime host-owned-DOM backend
