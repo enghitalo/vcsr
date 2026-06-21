@@ -182,8 +182,8 @@ boot, precomputes a response for every asset, and shares it lock-free across
 workers:
 
 ```v
-import http_server
-import http_server.static_assets
+import vanilla.http_server
+import vanilla.http_server.static_assets
 
 // Built once at boot from the dist/ vcsr emitted; immutable afterwards.
 const assets = static_assets.new(static_assets.Config{
@@ -243,12 +243,12 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 All modules (`ast`, `parser`, `slots`, `bind`, `component`, `css`, `router`,
 `wasm`, `manifest`, `bundle`) are plain V under the `vcsr` module name. To
 resolve `import vcsr.*`, put the repo on V's module path (clone it as `vcsr/`,
-or symlink it). Phase 10 also serves through vanilla, so `http_server` must
-resolve too:
+or symlink it). Phase 10 also serves through vanilla, so the `vanilla` module
+must be on the path too (`v install` it, or symlink it as `vanilla`):
 
 ```sh
 ln -s "$PWD" ~/.vmodules/vcsr                          # make `import vcsr.*` resolve
-ln -s ~/.vmodules/vanilla/http_server ~/.vmodules/http_server  # for phase 10 (static_assets)
+ln -s /path/to/vanilla ~/.vmodules/vanilla             # for phase 10 (vanilla.http_server.static_assets)
 v test tests/                                          # all 11 phases — pass
 ```
 

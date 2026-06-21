@@ -10,7 +10,7 @@
 module main
 
 import vcsr.bundle { Bundle }
-import http_server.static_assets
+import vanilla.http_server.static_assets
 
 const dist = 'testdata/fixture-app/dist'
 

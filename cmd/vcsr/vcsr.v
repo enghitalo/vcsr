@@ -16,8 +16,8 @@ module main
 import os
 import vcsr.bundle
 import vcsr.component
-import http_server
-import http_server.static_assets
+import vanilla.http_server
+import vanilla.http_server.static_assets
 
 const version = '0.0.1'
 

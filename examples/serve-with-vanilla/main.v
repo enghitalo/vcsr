@@ -9,8 +9,8 @@
 //   3. ../../testdata/fixture-app/dist             (committed real bundle, fallback)
 module main
 
-import http_server
-import http_server.static_assets
+import vanilla.http_server
+import vanilla.http_server.static_assets
 import os
 
 fn resolve_dist() string {

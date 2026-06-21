@@ -5,12 +5,12 @@ The command-line front door to the implemented compiler. The pipeline (phases
 
 ## Build & install
 
-`vcsr` imports `vcsr.*` and (for `serve`) vanilla's `http_server`, so both must
-be on V's module path:
+`vcsr` imports `vcsr.*` and (for `serve`) `vanilla.http_server`, so both the
+`vcsr` and `vanilla` modules must be on V's module path:
 
 ```sh
-ln -s "$PWD" ~/.vmodules/vcsr                                   # import vcsr.*
-ln -s ~/.vmodules/vanilla/http_server ~/.vmodules/http_server  # for `serve`
+ln -s "$PWD" ~/.vmodules/vcsr               # import vcsr.*
+ln -s /path/to/vanilla ~/.vmodules/vanilla  # for `serve` (vanilla.http_server)
 
 v -prod -o ~/.local/bin/vcsr cmd/vcsr/      # install on PATH
 # or just build it in place:  v -o cmd/vcsr/vcsr cmd/vcsr/

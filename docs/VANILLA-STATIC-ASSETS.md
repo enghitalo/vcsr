@@ -33,8 +33,8 @@ threads:
 The whole request handler is two lines:
 
 ```v
-import http_server
-import http_server.static_assets
+import vanilla.http_server
+import vanilla.http_server.static_assets
 
 // Built ONCE at boot from the dist/ directory; immutable and lock-free after.
 const assets = static_assets.new(static_assets.Config{
@@ -137,7 +137,7 @@ A `static_assets` module (works on top of the existing raw `handle_request`
 contract — pure, socket-free, E2E-testable like the rest of vanilla):
 
 ```v
-import http_server.static_assets
+import vanilla.http_server.static_assets
 
 // Built once at boot from a directory (optionally a manifest the build emits).
 mut assets := static_assets.new(static_assets.Config{

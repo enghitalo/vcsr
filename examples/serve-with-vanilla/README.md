@@ -15,8 +15,8 @@ VCSR_DIST=testdata/dashboard-app/dist  v run examples/serve-with-vanilla/main.v
 ```
 
 It resolves the bundle in order: `$VCSR_DIST` → `./dist` (what `vcsr build` would
-emit) → `../../testdata/fixture-app/dist` (fallback). `requires http_server` on
-V's module path — `ln -s ~/.vmodules/vanilla/http_server ~/.vmodules/http_server`.
+emit) → `../../testdata/fixture-app/dist` (fallback). Needs the `vanilla` module
+on V's module path — `ln -s /path/to/vanilla ~/.vmodules/vanilla`.
 
 > The `vcsr build` CLI is the remaining roadmap; today the bundle is produced by
 > a library call — `bundle.build('testdata/fixture-app', release: true)` writes a
