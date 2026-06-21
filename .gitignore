@@ -23,3 +23,6 @@ dist/
 
 # vcsr-generated component code (emitted from name.v/.html/.css triplets)
 *.gen.v
+
+# built vcsr CLI binary
+cmd/vcsr/vcsr
