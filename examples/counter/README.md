@@ -20,8 +20,10 @@ Files:
 - [src/counter.html](src/counter.html) — the **template** (vcsr's dialect).
 - [src/counter.css](src/counter.css) — **scoped styles**.
 - [src/main.v](src/main.v) — the app entrypoint (`new_app` → `render` → `mount`).
-- [index.html](index.html) — the empty shell; `vcsr build` emits the hashed
-  production version into `dist/`.
+- [index.html](index.html) — an **illustrative** empty-body shell (not served or
+  runnable here — counter has no prebuilt wasm). For a real browser-running app,
+  see [testdata/dashboard-app](../../testdata/dashboard-app) +
+  [tools/browser-smoke](../../tools/browser-smoke).
 
 What to notice:
 

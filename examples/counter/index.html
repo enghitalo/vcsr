@@ -1,8 +1,13 @@
 <!doctype html>
 <!--
-  Empty shell. The <body> ships empty: the WASM builds the entire UI client-side.
-  `vcsr build` emits the production version of this into dist/ with the hashed
-  asset names wired in (e.g. app.[hash].js, app.[hash].css).
+  ILLUSTRATIVE shell — shows the shape vcsr targets: an empty <body> that the
+  WASM fills client-side. It is NOT served or runnable here: counter is
+  dialect SOURCE (no prebuilt browser wasm), so there's no app.js/core.wasm to
+  load. For a real, served, browser-running app see testdata/dashboard-app
+  (built with `vcsr build`, served by `vcsr serve`, screenshotted by
+  tools/browser-smoke). `vcsr build` would emit a version of this with hashed
+  asset names (app.[hash].js, app.[hash].css) once V can compile these
+  components to browser wasm.
 -->
 <html lang="en" data-theme="light">
   <head>
