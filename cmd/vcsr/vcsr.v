@@ -72,6 +72,18 @@ fn do_build(rest []string) ! {
 		return error('build: missing <app> directory (e.g. testdata/dashboard-app)')
 	}
 	app := pos[0]
+	// A bundle-ready app ships an app.json + prebuilt browser-ABI wasm in build/.
+	// The examples/ apps are vcsr-dialect authoring source (no app.json, no
+	// prebuilt wasm — V can't emit browser wasm yet), so point the user at `gen`.
+	if !os.exists(os.join_path(app, 'app.json')) {
+		return error('build: "${app}" is not a bundle-ready app — no app.json.
+  `build` bundles an app dir with app.json + prebuilt build/*.wasm (e.g. testdata/dashboard-app).
+  The examples/ apps are vcsr-dialect source; generate a component instead:  vcsr gen <triplet>')
+	}
+	if !os.exists(os.join_path(app, 'build', 'core.wasm')) {
+		return error('build: "${app}/build/core.wasm" not found — no prebuilt browser-ABI wasm to bundle.
+  V cannot emit browser wasm yet, so an app must ship its compiled core.wasm in build/ (see docs/WASM-PATHS-ANALYSIS.md).')
+	}
 	b := bundle.build(app, release: 'release' in flags)!
 	dist := os.join_path(app, 'dist')
 	println('✓ built ${app} → ${dist}/')

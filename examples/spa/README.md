@@ -9,10 +9,18 @@ code-splitting story from [docs/DESIGN.md](../../docs/DESIGN.md).
 > [counter](../counter) example is the one that runs end-to-end through the
 > current pipeline. The router/chunk plan this app relies on *is* implemented
 > (phase 06): `router.plan(...)` produces exactly the core/lazy split below.
+>
+> **`vcsr build` does not apply here.** Bundling needs a browser-ABI `core.wasm`,
+> which V can't emit from these `.v` components yet — so this app ships no
+> `build/`+`app.json` and `vcsr build ./src` errors by design. What you *can* run:
 
 ```sh
-vcsr build ./src --out dist --release    # planned CLI
-# serve dist/ — see ../serve-with-vanilla
+# generate a component's plain-V view()/style() (works for the simple ones):
+vcsr gen src/shared/button
+vcsr gen src/components/not_found
+
+# for a full, bundleable app today, see the C→wasm demo:
+vcsr build ../../testdata/dashboard-app && vcsr serve ../../testdata/dashboard-app/dist
 ```
 
 ## What it demonstrates
