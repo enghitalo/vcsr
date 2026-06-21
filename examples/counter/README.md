@@ -4,9 +4,12 @@ The smallest meaningful vcsr app: a single component as a **file triplet** — V
 logic, an HTML template, and CSS in separate files. The page ships empty; the
 WASM builds the UI client-side and patches only the text nodes that change.
 
+This is dialect **source**, not a bundleable app — V can't emit a browser
+`core.wasm` from these `.v` components yet, so `vcsr build ./src` errors by
+design (no `build/`+`app.json`). What runs today is the codegen step:
+
 ```sh
-vcsr build ./src --out dist --release
-# serve dist/ — see ../serve-with-vanilla
+vcsr gen src/counter      # → src/counter.gen.v  (see "What vcsr generates" below)
 ```
 
 Files:
