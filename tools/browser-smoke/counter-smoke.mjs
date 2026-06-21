@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DIR = path.resolve(HERE, '../../examples/counter/wasm');
+// VCSR_WASM_DIR lets this drive any `vcsr wasm` output dir (e.g. one with the
+// DEFAULT emitted app.js/index.html); defaults to the counter example.
+const DIR = process.env.VCSR_WASM_DIR || path.resolve(HERE, '../../examples/counter/wasm');
 const SHOTS = path.join(HERE, 'screenshots', 'counter');
 if (!existsSync(path.join(DIR, 'core.wasm'))) { console.error(`No core.wasm in ${DIR} — run ./build.sh first.`); process.exit(1); }
 mkdirSync(SHOTS, { recursive: true });

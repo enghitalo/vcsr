@@ -121,8 +121,20 @@ fn do_wasm(rest []string) ! {
 
 	os.rm(cfile) or {}
 	println('✓ ${wasmfile}  (${os.file_size(wasmfile)} B)')
-	println('  serve ${out} with Content-Type: application/wasm and open index.html.')
-	println('  the host loader (app.js) implements the DOM ABI in runtime/vcsr_host.h.')
+
+	// emit a runnable default loader + page, but never clobber a customized one
+	// (same "default unless the app ships its own" rule as bundle's loader_js).
+	app_js := os.join_path(out, 'app.js')
+	if !os.exists(app_js) {
+		os.write_file(app_js, $embed_file('templates/wasm_loader.js').to_string())!
+		println('+ ${app_js}  (default host loader — edit freely; re-runs keep it)')
+	}
+	index_html := os.join_path(out, 'index.html')
+	if !os.exists(index_html) {
+		os.write_file(index_html, $embed_file('templates/wasm_index.html').to_string())!
+		println('+ ${index_html}')
+	}
+	println('  run it:  vcsr serve ${out}  (sets Content-Type: application/wasm)')
 }
 
 // run_step executes one external build command, surfacing its output on failure.

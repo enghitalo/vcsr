@@ -137,9 +137,14 @@ at all. See [WASM-PATHS-ANALYSIS.md](WASM-PATHS-ANALYSIS.md) §6 — Path 2
 >   `<span>`=doubled (0→1→3 / 0→2→6) through the host DOM FFI — and in Node/V8
 >   (`examples/counter/wasm/smoke.mjs`).
 >
+> `vcsr wasm <src>` now emits a complete, runnable bundle — `core.wasm` **plus** a
+> default `app.js` (DOM-ABI host loader + WASI shim) and `index.html` (it won't
+> clobber a customized one) — so `vcsr wasm` + `vcsr serve` opens in a browser with
+> no hand-written JS (verified against the emitted default in Chromium).
+>
 > Still future work: a map-free wasm **App/router** (the App layer is native-only
-> — it leans on the `js_ffi` mock whose maps don't run on wasm), and folding the
-> loader/WASI-shim emission into `vcsr wasm`.
+> — it leans on the `js_ffi` mock whose maps don't run on wasm); injecting the
+> component's scoped `style()` CSS on the wasm path; and `@for` keyed-list render.
 
 ### Gate 2 — The `js` FFI is a **synchronous** native mock
 
