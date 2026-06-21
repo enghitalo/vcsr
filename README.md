@@ -146,14 +146,20 @@ derives `Content-Type`/`Cache-Control`/encoding from the filenames + the
 `*.[hash].*` glob (immutable for hashed assets, `no-cache` for `index.html`) — it
 does not read `manifest.json`, which is vcsr's own record for the JS loader.
 
-## CLI (planned)
+## CLI
+
+[cmd/vcsr](cmd/vcsr) wires the implemented pipeline into commands:
 
 ```sh
-vcsr build  ./src --out dist --release   # full production bundle
-vcsr watch  ./src                        # dev server (HMR, source maps)
-vcsr check  ./src                        # type/template diagnostics only
-vcsr serve  dist                         # reference vanilla server over the bundle
+vcsr gen   <triplet>          # analyze a .v/.html/.css triplet → write <name>.gen.v  (runs today)
+vcsr build <app> [--release]  # bundle an app dir (with app.json + prebuilt build/*.wasm) → <app>/dist
+vcsr serve <dist> [--port N]  # serve a built dist/ with the vanilla HTTP server
 ```
+
+`build` requires a prebuilt browser-ABI `core.wasm` (V can't emit browser wasm
+yet), so it targets apps like [testdata/dashboard-app](testdata/dashboard-app);
+the dialect-source [examples](examples) use `vcsr gen` per component. `watch`
+(HMR) and `check` remain on the roadmap. See [cmd/vcsr/README.md](cmd/vcsr/README.md).
 
 ## Examples
 

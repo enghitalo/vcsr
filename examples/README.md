@@ -12,14 +12,18 @@
 > generated output). The rendering model is proven live in a browser by
 > [tools/browser-smoke](../tools/browser-smoke).
 
-Each example is a self-contained app. The intended workflow (the `vcsr` CLI is
-the remaining roadmap; today the pieces run as library calls — see counter):
+The `vcsr` CLI exists ([cmd/vcsr](../cmd/vcsr)) with `gen` / `build` / `serve`.
+Note: **`vcsr build` needs a browser `core.wasm`, which V can't emit from these
+`.v` components yet** — so the example apps here are *not* `vcsr build`-able (they
+ship no `build/`+`app.json`). What runs on them today is per-component codegen:
 
 ```sh
-vcsr build  ./src --out dist --release   # emit the CSR bundle into dist/ (planned CLI)
-vcsr watch  ./src                        # dev server with HMR + source maps (planned)
-# then serve dist/ with vanilla — see examples/serve-with-vanilla
+vcsr gen counter/src/counter             # → counter/src/counter.gen.v (plain V view()/style())
+# A full, bundleable app (prebuilt browser-ABI wasm) lives in ../testdata; e.g.:
+vcsr build ../testdata/dashboard-app && vcsr serve ../testdata/dashboard-app/dist
 ```
+
+`vcsr watch` (HMR dev server) is still on the roadmap.
 
 ## Examples
 
