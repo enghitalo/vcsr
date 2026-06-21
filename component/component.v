@@ -258,33 +258,38 @@ pub fn (c &Component) codegen() !Generated {
 
 // emit_bind writes one runtime binding call for slot `i`.
 fn (c &Component) emit_bind(mut b strings.Builder, recv string, i int, s slots.SlotDesc) {
+	// every closure captures the receiver as `[mut recv]`: the bound expressions
+	// read signals (get() subscribes the effect, a mut method) and call mut
+	// methods, so the captured copy must be mutable.
 	match s.kind {
 		.text {
-			b.write_string('\truntime.bind_text(mut ins, ${i}, fn [${recv}] () string { return runtime.to_str(${c.qualify(s.expr,
+			b.write_string('\truntime.bind_text(mut ins, ${i}, fn [mut ${recv}] () string { return runtime.to_str(${c.qualify(s.expr,
 				true)}) })\n')
 		}
 		.attr {
-			b.write_string("\truntime.bind_attr(mut ins, ${i}, '${esc(s.name)}', fn [${recv}] () string { return runtime.to_str(${c.qualify(s.expr,
+			b.write_string("\truntime.bind_attr(mut ins, ${i}, '${esc(s.name)}', fn [mut ${recv}] () string { return runtime.to_str(${c.qualify(s.expr,
 				true)}) })\n")
 		}
 		.event {
+			// always wrap in a closure (not a bare `recv.handler` method value,
+			// which V rejects for a stack receiver) so the handler runs the method.
 			if is_bare_ident(s.handler) && c.has_method(s.handler) {
-				b.write_string('\truntime.bind_event(mut ins, ${i}, ${recv}.${s.handler})\n')
+				b.write_string('\truntime.bind_event(mut ins, ${i}, fn [mut ${recv}] () { ${recv}.${s.handler}() })\n')
 			} else {
-				b.write_string('\truntime.bind_event(mut ins, ${i}, fn [${recv}] () { ${c.qualify(s.handler,
+				b.write_string('\truntime.bind_event(mut ins, ${i}, fn [mut ${recv}] () { ${c.qualify(s.handler,
 					false)} })\n')
 			}
 		}
 		.bind {
-			b.write_string('\truntime.bind_value(mut ins, ${i}, fn [${recv}] () string { return runtime.to_str(${c.qualify(s.target_expr,
+			b.write_string('\truntime.bind_value(mut ins, ${i}, fn [mut ${recv}] () string { return runtime.to_str(${c.qualify(s.target_expr,
 				true)}) }, fn [mut ${recv}] (v string) { ${c.qualify(s.target_expr, false)}.set(v) })\n')
 		}
 		.cond {
-			b.write_string('\truntime.bind_if(mut ins, ${i}, fn [${recv}] () bool { return ${c.qualify(s.cond_expr,
+			b.write_string('\truntime.bind_if(mut ins, ${i}, fn [mut ${recv}] () bool { return ${c.qualify(s.cond_expr,
 				true)} })\n')
 		}
 		.list {
-			b.write_string('\truntime.bind_list(mut ins, ${i}, fn [${recv}] () int { return ${c.qualify(s.source_expr,
+			b.write_string('\truntime.bind_list(mut ins, ${i}, fn [mut ${recv}] () int { return ${c.qualify(s.source_expr,
 				true)}.len })\n')
 		}
 	}
@@ -382,7 +387,11 @@ pub fn decide_hoist(input HoistInput) HoistDecision {
 // from the `.v` logic file. It is a focused scan, not a full V parser: enough to
 // resolve template references and emit codegen receivers.
 fn parse_logic(src string) !(string, []Field, []string) {
-	si := find_word_from(src, 'struct', 0)
+	// Anchor on the @[component] attribute (which immediately precedes the
+	// struct) so a stray "struct" in a doc comment isn't picked up as the name.
+	anchor := index_of(src, '@[component]', 0)
+	start := if anchor >= 0 { anchor } else { 0 }
+	si := find_word_from(src, 'struct', start)
 	if si < 0 {
 		return error('no @[component] struct found in logic file')
 	}

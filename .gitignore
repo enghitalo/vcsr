@@ -21,6 +21,10 @@ dist/
 
 # vcsr-generated component code (emitted from name.v/.html/.css triplets)
 *.gen.v
+# ...except the counter example's, committed so the example compiles and its
+# integration test (counter_test.v) runs from a clean checkout without first
+# running `vcsr gen`. It also shows readers exactly what codegen emits.
+!examples/counter/src/counter.gen.v
 
 # built vcsr CLI binary
 cmd/vcsr/vcsr

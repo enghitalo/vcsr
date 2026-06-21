@@ -58,11 +58,11 @@ const __counter_tpl = runtime.Template{
 	]
 }
 
-pub fn (mut c Counter) view() vcsr.View {
+pub fn (mut c Counter) view() runtime.View {
 	mut ins := __counter_tpl.instance()
-	runtime.bind_text(mut ins, 0, fn [c] () string { return runtime.to_str(c.count.get()) })
-	runtime.bind_text(mut ins, 1, fn [c] () string { return runtime.to_str(c.doubled()) })
-	runtime.bind_event(mut ins, 2, c.inc)
+	runtime.bind_text(mut ins, 0, fn [mut c] () string { return runtime.to_str(c.count.get()) })
+	runtime.bind_text(mut ins, 1, fn [mut c] () string { return runtime.to_str(c.doubled()) })
+	runtime.bind_event(mut ins, 2, fn [mut c] () { c.inc() })
 	return ins.view()
 }
 ```
@@ -72,5 +72,10 @@ in the wasm data segment; the slot table says exactly which node each signal
 patches. `c.count.get()` reads the signal; `c.doubled()` calls the computed; the
 `<span>` wrapper keeps `{{ doubled }}` as an element's sole child (what the slot
 extractor supports today). `counter.css` is scoped to a per-component hash so
-`.counter`/`.muted` can't collide. The only thing missing to *run* this is the
-`vcsr.runtime` library + browser-wasm emission (roadmap).
+`.counter`/`.muted` can't collide.
+
+This whole triplet now **compiles and reacts** against the `vcsr.runtime` library
+(slices 1–4): `v -enable-globals test examples/counter/src/` drives the generated
+`view()` — a click runs `inc`, and the `<h1>`/`<span>` re-patch reactively (see
+[src/counter_test.v](src/counter_test.v)). The remaining roadmap is browser-wasm
+emission + the wasm DOM backend (the runtime's native mock proves the logic).
