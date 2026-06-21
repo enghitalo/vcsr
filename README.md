@@ -243,6 +243,7 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 | 09 ✅ | [phase_09_vanilla_manifest_test.v](tests/phase_09_vanilla_manifest_test.v) | manifest + a `static_assets`-consumable `dist/` (vanilla serves it) — **implemented** ([manifest/](manifest)) |
 | 10 ✅ | [phase_10_e2e_test.v](tests/phase_10_e2e_test.v) | optimization passes + full build → servable bundle (served by vanilla) — **implemented** ([bundle/](bundle)) |
 | 11 ✅ | [phase_11_abi_conformance_test.v](tests/phase_11_abi_conformance_test.v) | the WASM ABI is **language-neutral**: a non-V module (Rust/Zig/C/WAT) honoring the contract conforms — **implemented** ([wasm/](wasm)), [docs/WASM-ABI.md](docs/WASM-ABI.md), fixtures in [tests/fixtures/abi/](tests/fixtures/abi) |
+| 12 🚧 | [phase_12_runtime_signals_test.v](tests/phase_12_runtime_signals_test.v) | the **runtime library** the generated code imports — **in progress**. Slice 1 (the reactive core: `Signal`/`effect`, [signal.v](signal.v)) is implemented; the `js` FFI substrate, the Template/bind engine, and the app/router runtime are next. This is what closes the loop from a triplet to a running app. |
 
 ### Building & testing
 
@@ -255,8 +256,12 @@ must be on the path too (`v install` it, or symlink it as `vanilla`):
 ```sh
 ln -s "$PWD" ~/.vmodules/vcsr                          # make `import vcsr.*` resolve
 ln -s /path/to/vanilla ~/.vmodules/vanilla             # for phase 10 (vanilla.http_server.static_assets)
-v test tests/                                          # all 11 phases — pass
+v -enable-globals test tests/                          # all 12 phases — pass
 ```
+
+`-enable-globals` is needed because the runtime's reactive core (phase 12) keeps
+its effect stack in a global — natural for the single-threaded wasm guest it
+targets. Phases 01–11 don't need it; the whole suite runs fine with it on.
 
 The whole suite is green. Two things the bundle phases rely on: `node` (for
 brotli — V has no brotli) and the prebuilt browser-ABI `.wasm` under
