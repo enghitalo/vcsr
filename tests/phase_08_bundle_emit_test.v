@@ -67,3 +67,18 @@ fn test_release_runs_size_optimizer() {
 	assert b.meta.wasm_opt_level == 'Oz' // size-optimized in release
 	assert b.meta.names_stripped
 }
+
+fn test_default_loader_wires_sync_web_apis() {
+	// the generated loader (no custom src/loader.js in the fixture) must expose the
+	// synchronous Web-API host imports from docs/WEB-API-SUPPORT.md, not just the
+	// DOM template ops. Async resources (fetch/timers/sockets/IDB) stay out.
+	b := built()
+	js := b.text(b.find('app.*.js')!.name)!
+	assert js.contains('ls_get(') && js.contains('ls_set(') // localStorage
+	assert js.contains('ss_get(') && js.contains('ss_set(') // sessionStorage
+	assert js.contains('host_log(') // console
+	assert js.contains('random_get(') // crypto.getRandomValues
+	assert js.contains('loc_read(') // read location
+	assert js.contains('history_push(') // history.pushState
+	assert !js.contains('fetch_start') && !js.contains('ws_open') // async: deliberately absent
+}

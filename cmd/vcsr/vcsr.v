@@ -1,16 +1,19 @@
 // vcsr — the command-line front door to the implemented compiler.
 //
-// The pipeline (phases 01–11) lives in libraries; this binary wires three of
-// them into commands a developer runs:
+// The pipeline (phases 01–11) lives in libraries; this binary wires them into
+// commands a developer runs:
 //
 //   vcsr gen   <triplet>          analyze a .v/.html/.css triplet → write <name>.gen.v
+//   vcsr wasm  <src> [--out DIR]  compile a component src dir → core.wasm (v -cc clang)
 //   vcsr build <app> [--release]  bundle an app dir → <app>/dist (hashing, br/gz, manifest)
 //   vcsr serve <dist> [--port N]  serve a built dist/ with the vanilla HTTP server
 //   vcsr version | help
 //
-// Browser-wasm emission is the remaining roadmap, so `build` consumes prebuilt
-// browser-ABI wasm from <app>/build/ (see docs/WASM-PATHS-ANALYSIS.md). `gen`
-// runs fully today.
+// `wasm` emits a browser-ABI core.wasm from a V component via Path 2 (v -cc clang
+// + wasi-sdk), using the runtime's host-owned-DOM backend (the native mock tree's
+// string-keyed maps + closures don't run on wasm — see docs/WASM-PATHS-ANALYSIS.md
+// §2.1, examples/counter/wasm). `build` still consumes prebuilt wasm from
+// <app>/build/.
 module main
 
 import os
@@ -30,11 +33,24 @@ fn main() {
 	cmd := args[0]
 	rest := args#[1..]
 	match cmd {
-		'gen' { do_gen(rest) or { fail(err) } }
-		'build' { do_build(rest) or { fail(err) } }
-		'serve' { do_serve(rest) or { fail(err) } }
-		'version', '--version', '-v' { println('vcsr ${version}') }
-		'help', '--help', '-h' { usage() }
+		'gen' {
+			do_gen(rest) or { fail(err) }
+		}
+		'wasm' {
+			do_wasm(rest) or { fail(err) }
+		}
+		'build' {
+			do_build(rest) or { fail(err) }
+		}
+		'serve' {
+			do_serve(rest) or { fail(err) }
+		}
+		'version', '--version', '-v' {
+			println('vcsr ${version}')
+		}
+		'help', '--help', '-h' {
+			usage()
+		}
 		else {
 			eprintln('vcsr: unknown command "${cmd}"\n')
 			usage()
@@ -51,7 +67,9 @@ fn do_gen(rest []string) ! {
 		return error('gen: missing <triplet> path (e.g. examples/counter/src/counter)')
 	}
 	base := strip_known_ext(pos[0])
-	vsrc := os.read_file('${base}.v') or { return error('gen: cannot read ${base}.v: ${err.msg()}') }
+	vsrc := os.read_file('${base}.v') or {
+		return error('gen: cannot read ${base}.v: ${err.msg()}')
+	}
 	html := os.read_file('${base}.html') or {
 		return error('gen: cannot read ${base}.html: ${err.msg()}')
 	}
@@ -62,6 +80,57 @@ fn do_gen(rest []string) ! {
 	out := os.join_path(os.dir(base), gen.filename)
 	os.write_file(out, gen.source)!
 	println('✓ generated ${out}  (compiles_with_stock_v=${gen.compiles_with_stock_v})')
+}
+
+// --- wasm: component src dir → core.wasm (Path 2; host-owned-DOM backend) ----
+//
+// Runs the V→C→clang recipe with -d wasm_browser so the runtime compiles its
+// map-free, closure-free wasm backend (the native mock tree uses string-keyed
+// maps + closures, neither of which run on wasm — see docs/WASM-PATHS-ANALYSIS.md
+// §2.1). Needs an unpacked wasi-sdk (set WASI_SDK, default /opt/wasi-sdk).
+fn do_wasm(rest []string) ! {
+	pos, flags := parse_args(rest)
+	if pos.len == 0 {
+		return error('wasm: missing <component src> dir (e.g. examples/counter/src)')
+	}
+	src := pos[0]
+	if !os.is_dir(src) {
+		return error('wasm: "${src}" is not a directory')
+	}
+	out := flags['out'] or { os.join_path(os.dir(src.trim_right('/')), 'wasm') }
+	os.mkdir_all(out)!
+
+	wasi_sdk := if w := os.getenv_opt('WASI_SDK') { w } else { '/opt/wasi-sdk' }
+	clang := os.join_path(wasi_sdk, 'bin', 'clang')
+	sysroot := os.join_path(wasi_sdk, 'share', 'wasi-sysroot')
+	if !os.exists(clang) || !os.is_dir(sysroot) {
+		return error('wasm: wasi-sdk not found at ${wasi_sdk} — set WASI_SDK to an unpacked wasi-sdk')
+	}
+	// repo root holds runtime/vcsr_host.h (the DOM-ABI prototypes the C needs).
+	runtime_inc := os.join_path(os.dir(os.dir(os.dir(@FILE))), 'runtime')
+	cfile := os.join_path(out, 'core.c')
+	wasmfile := os.join_path(out, 'core.wasm')
+
+	// 1) V → C, host-owned-DOM backend (-d wasm_browser); strip Linux-only bits.
+	run_step('V→C',
+		'${os.quoted_path(@VEXE)} -d wasm_browser -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler -enable-globals -cc clang -gc none -o ${os.quoted_path(cfile)} ${os.quoted_path(src)}')!
+
+	// 2) C → wasm, reactor model; -I runtime for vcsr_host.h.
+	run_step('C→wasm',
+		'${os.quoted_path(clang)} --sysroot=${os.quoted_path(sysroot)} --target=wasm32-wasip1 -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -Wl,--strip-all -I ${os.quoted_path(runtime_inc)} -D_WASI_EMULATED_MMAN -lwasi-emulated-mman -D_WASI_EMULATED_SIGNAL -lwasi-emulated-signal -O3 -o ${os.quoted_path(wasmfile)} ${os.quoted_path(cfile)}')!
+
+	os.rm(cfile) or {}
+	println('✓ ${wasmfile}  (${os.file_size(wasmfile)} B)')
+	println('  serve ${out} with Content-Type: application/wasm and open index.html.')
+	println('  the host loader (app.js) implements the DOM ABI in runtime/vcsr_host.h.')
+}
+
+// run_step executes one external build command, surfacing its output on failure.
+fn run_step(label string, cmd string) ! {
+	res := os.execute(cmd)
+	if res.exit_code != 0 {
+		return error('wasm: ${label} step failed:\n${res.output}')
+	}
 }
 
 // --- build: app dir → app/dist ----------------------------------------------
@@ -192,15 +261,19 @@ fn usage() {
 
 USAGE:
   vcsr gen   <triplet>            generate <name>.gen.v from a .v/.html/.css triplet
+  vcsr wasm  <src> [--out DIR]    compile a component src dir → core.wasm (v -cc clang)
   vcsr build <app> [--release]    bundle an app dir → <app>/dist (hashing, br/gz, manifest)
   vcsr serve <dist> [--port N]    serve a built dist/ with the vanilla HTTP server
   vcsr version | help
 
 EXAMPLES:
   vcsr gen   examples/counter/src/counter
+  vcsr wasm  examples/counter/src               # → examples/counter/wasm/core.wasm
   vcsr build testdata/dashboard-app --release
   vcsr serve testdata/dashboard-app/dist --port 3000
 
-NOTE: browser-wasm emission is roadmap; `build` consumes prebuilt browser-ABI
-wasm from <app>/build/ (see docs/WASM-PATHS-ANALYSIS.md). `gen` runs fully today.')
+NOTE: `wasm` compiles a V component to a browser-ABI core.wasm via Path 2
+(v -cc clang + wasi-sdk; set WASI_SDK), using the runtime host-owned-DOM backend
+(see docs/WASM-PATHS-ANALYSIS.md + examples/counter/wasm). `build` still consumes
+prebuilt wasm from <app>/build/. `gen` and `wasm` run fully today.')
 }

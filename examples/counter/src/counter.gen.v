@@ -11,23 +11,48 @@ const __counter_tpl = runtime.Template{
   <button>+1</button>
 </main>'
 	slots: [
-		runtime.SlotDesc{ kind: .text, path: [0] },
-		runtime.SlotDesc{ kind: .text, path: [1, 0] },
-		runtime.SlotDesc{ kind: .event, path: [2], name: 'click' },
+		runtime.SlotDesc{
+			kind: .text
+			path: [0]
+		},
+		runtime.SlotDesc{
+			kind: .text
+			path: [1, 0]
+		},
+		runtime.SlotDesc{
+			kind: .event
+			path: [2]
+			name: 'click'
+		},
 	]
+}
+
+fn counter_slot0_get(ctxp voidptr) string {
+	mut c := unsafe { &Counter(ctxp) }
+	return runtime.to_str(c.count.get())
+}
+
+fn counter_slot1_get(ctxp voidptr) string {
+	mut c := unsafe { &Counter(ctxp) }
+	return runtime.to_str(c.doubled())
+}
+
+fn counter_slot2_evt(ctxp voidptr) {
+	mut c := unsafe { &Counter(ctxp) }
+	c.inc()
 }
 
 pub fn (mut c Counter) view() runtime.View {
 	mut ins := __counter_tpl.instance()
-	runtime.bind_text(mut ins, 0, fn [mut c] () string { return runtime.to_str(c.count.get()) })
-	runtime.bind_text(mut ins, 1, fn [mut c] () string { return runtime.to_str(c.doubled()) })
-	runtime.bind_event(mut ins, 2, fn [mut c] () { c.inc() })
+	runtime.bind_text_ctx(mut ins, 0, voidptr(&c), counter_slot0_get)
+	runtime.bind_text_ctx(mut ins, 1, voidptr(&c), counter_slot1_get)
+	runtime.bind_event_ctx(mut ins, 2, voidptr(&c), counter_slot2_evt)
 	return ins.view()
 }
 
 pub fn (c Counter) style() string {
-	return '/* Counter styles. Plain CSS; vcsr scopes these selectors to the Counter
-   component at build time, so `.counter_fc0f33c3`/`.muted_fc0f33c3` can\'t collide with any other
+	return "/* Counter styles. Plain CSS; vcsr scopes these selectors to the Counter
+   component at build time, so `.counter_fc0f33c3`/`.muted_fc0f33c3` can't collide with any other
    component. Tree-shaken if a class is never referenced by counter.html_fc0f33c3. */
 .counter_fc0f33c3 {
   display: grid;
@@ -43,5 +68,5 @@ button {
   border-radius: 0.5rem;
   cursor: pointer;
 }
-'
+"
 }

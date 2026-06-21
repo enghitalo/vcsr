@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vcsr counter — compiled V → wasm</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+    .counter { display: grid; gap: .5rem; padding: 2rem; max-width: 20rem; }
+    .muted { color: #888; }
+    button { padding: .5rem 1rem; border-radius: .5rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <!-- empty: the wasm module builds the UI client-side and patches the text nodes that change -->
+  <div id="app"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

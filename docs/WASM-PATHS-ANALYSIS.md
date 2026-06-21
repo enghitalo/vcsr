@@ -79,16 +79,50 @@ step is the reactor-model link from the [concept example](../../concept-examples
 | V feature exercised                                  | result         | size (uncompressed) |
 | ---------------------------------------------------- | -------------- | ------------------- |
 | dynamic arrays + `.sort()` with a closure comparator | ✅ validate=ok | 72 KB               |
-| maps                                                 | ✅             | 79 KB               |
+| maps (string keys)                                   | ⚠️ validates but **lookup fails at runtime** — see below | 79 KB |
 | UTF-8 strings + interpolation                        | ✅             | 64 KB               |
 | structs in a dynamic array                           | ✅             | 64 KB               |
-| closures (capturing)                                 | ✅             | 69 KB               |
+| closures (capturing)                                 | ⚠️ validates but **traps at runtime** — see below | 69 KB |
 | generics                                             | ✅             | 65 KB               |
 | interfaces (dynamic dispatch)                        | ✅             | 64 KB               |
 | sum types + `match`                                  | ✅             | 65 KB               |
 
 Every one passes `wasm-validate`. The floor is ~64 KB (V runtime + libc),
 uncompressed — brotli cuts that sharply, and it's a one-time core cost.
+
+> **Correction (2026-06-21) — "validate" ≠ "run" for capturing closures.** The
+> closures row above was measured with `wasm-validate` only. On **execution** in a
+> JS engine, a V *capturing* closure (`fn [x] () {...}`) that is stored and later
+> called **traps**: `RuntimeError: table index is out of bounds`. V implements
+> capturing closures with runtime-generated **executable memory** (mprotect / exec
+> pages, `vlib/builtin/closure/closure_nix.c.v`), which wasm forbids — so the
+> module validates but the closure call indexes a bogus function-table slot.
+> Measured, `v -cc clang` → wasm, run in Node 26: a **non-capturing** `fn () int`
+> returns correctly (it's a plain table index); a **capturing** `fn [x] () int`
+> throws `memory access out of bounds`. This is decisive for vcsr: the reactive
+> runtime (`signal.v` effects, every `runtime.bind_*` getter/handler) is built on
+> capturing closures, so it compiles and validates to wasm but **cannot run**
+> there as written. The fix — model effects as a top-level fn + a context pointer
+> (a plain table index) — is proven end-to-end in
+> [examples/wasm-reactive/](examples/wasm-reactive/) (a closure-free reactive
+> counter compiled from V that runs in wasm and drives the host via `(ptr,len)`).
+> Generics, interfaces, sum types, integer arithmetic, dynamic arrays, and
+> non-capturing fn values were re-confirmed to **run**, not just validate.
+>
+> **Correction (2026-06-21) — string-keyed maps also validate but don't run.** A
+> second execution-level failure, found while compiling the runtime: a
+> `map[string]V` validates but **its lookups fail** at runtime. Measured (`v -cc
+> clang` → wasm, Node 26, on both wasi-sdk 25/LLVM 19 and wasi-sdk 33/LLVM 22):
+> `m['a'] = 7; m['a']` returns **0**, and `'a' in m` is **false**, while `m.len`
+> correctly reports the inserted count — so inserts happen but key *retrieval*
+> can't find them, and a second string-map op panics `V panic: Probe overflow`.
+> Localized: **int-keyed maps work** (`map[int]int` returns the stored value) and
+> `hash.sum64_string` is deterministic and nonzero — so wyhash is fine; the fault
+> is V's map **string-key clone/equality** path on wasm. Consequence for vcsr: the
+> runtime's `map[string]…` uses (the template parser's attr maps, `Node.attrs`,
+> the event map) cannot run on wasm. The wasm rendering backend must therefore
+> delegate DOM + template parsing to the **host** and keep the V side to arrays /
+> int-keys (the dashboard fixture's architecture) — see docs/WEB-API-SUPPORT.md.
 
 ### 2.2 What the browser must provide
 

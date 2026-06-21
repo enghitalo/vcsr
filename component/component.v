@@ -234,7 +234,15 @@ pub fn (c &Component) codegen() !Generated {
 	b.write_string('\t]\n')
 	b.write_string('}\n\n')
 
-	// view(): clone the template once, wire each slot to the reactive runtime
+	// per-slot helpers: TOP-LEVEL fns (closure-free, so they run on wasm — see
+	// signal.v / docs/WEB-API-SUPPORT.md). Each takes the component as a `voidptr`
+	// ctx, casts it back, and evaluates the bound expression.
+	for i, s in c.tmpl.slots {
+		c.emit_slot_helper(mut b, i, s)
+	}
+
+	// view(): clone the template once, wire each slot to the reactive runtime via
+	// the closure-free bind_*_ctx API, passing the receiver as the ctx pointer.
 	b.write_string('pub fn (mut ${recv} ${c.name}) view() runtime.View {\n')
 	b.write_string('\tmut ins := __${lower}_tpl.instance()\n')
 	for i, s in c.tmpl.slots {
@@ -256,41 +264,72 @@ pub fn (c &Component) codegen() !Generated {
 	}
 }
 
-// emit_bind writes one runtime binding call for slot `i`.
+// emit_bind writes one closure-free runtime binding call for slot `i`: the
+// receiver is passed as the ctx pointer (`voidptr(&recv)`) and the per-slot
+// top-level helper fn (emitted by emit_slot_helper) is referenced by name.
 fn (c &Component) emit_bind(mut b strings.Builder, recv string, i int, s slots.SlotDesc) {
-	// every closure captures the receiver as `[mut recv]`: the bound expressions
-	// read signals (get() subscribes the effect, a mut method) and call mut
-	// methods, so the captured copy must be mutable.
+	lower := c.name.to_lower()
+	ctx := 'voidptr(&${recv})'
 	match s.kind {
 		.text {
-			b.write_string('\truntime.bind_text(mut ins, ${i}, fn [mut ${recv}] () string { return runtime.to_str(${c.qualify(s.expr,
-				true)}) })\n')
+			b.write_string('\truntime.bind_text_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get)\n')
 		}
 		.attr {
-			b.write_string("\truntime.bind_attr(mut ins, ${i}, '${esc(s.name)}', fn [mut ${recv}] () string { return runtime.to_str(${c.qualify(s.expr,
-				true)}) })\n")
+			b.write_string("\truntime.bind_attr_ctx(mut ins, ${i}, '${esc(s.name)}', ${ctx}, ${lower}_slot${i}_get)\n")
 		}
 		.event {
-			// always wrap in a closure (not a bare `recv.handler` method value,
-			// which V rejects for a stack receiver) so the handler runs the method.
+			b.write_string('\truntime.bind_event_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_evt)\n')
+		}
+		.bind {
+			b.write_string('\truntime.bind_value_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get, ${lower}_slot${i}_set)\n')
+		}
+		.cond {
+			b.write_string('\truntime.bind_if_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get)\n')
+		}
+		.list {
+			b.write_string('\truntime.bind_list_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get)\n')
+		}
+	}
+}
+
+// emit_slot_helper writes the TOP-LEVEL helper fn(s) for slot `i`. They cast the
+// `voidptr` ctx back to the component and evaluate the bound expression — the
+// closure-free equivalent of the old `fn [mut recv] () {...}` capture, so the
+// generated code runs on wasm (where a capturing closure traps; see signal.v).
+fn (c &Component) emit_slot_helper(mut b strings.Builder, i int, s slots.SlotDesc) {
+	lower := c.name.to_lower()
+	recv := c.recv()
+	cast := '\tmut ${recv} := unsafe { &${c.name}(ctxp) }\n'
+	match s.kind {
+		.text {
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
+			b.write_string('\treturn runtime.to_str(${c.qualify(s.expr, true)})\n}\n\n')
+		}
+		.attr {
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
+			b.write_string('\treturn runtime.to_str(${c.qualify(s.expr, true)})\n}\n\n')
+		}
+		.event {
+			b.write_string('fn ${lower}_slot${i}_evt(ctxp voidptr) {\n${cast}')
 			if is_bare_ident(s.handler) && c.has_method(s.handler) {
-				b.write_string('\truntime.bind_event(mut ins, ${i}, fn [mut ${recv}] () { ${recv}.${s.handler}() })\n')
+				b.write_string('\t${recv}.${s.handler}()\n}\n\n')
 			} else {
-				b.write_string('\truntime.bind_event(mut ins, ${i}, fn [mut ${recv}] () { ${c.qualify(s.handler,
-					false)} })\n')
+				b.write_string('\t${c.qualify(s.handler, false)}\n}\n\n')
 			}
 		}
 		.bind {
-			b.write_string('\truntime.bind_value(mut ins, ${i}, fn [mut ${recv}] () string { return runtime.to_str(${c.qualify(s.target_expr,
-				true)}) }, fn [mut ${recv}] (v string) { ${c.qualify(s.target_expr, false)}.set(v) })\n')
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
+			b.write_string('\treturn runtime.to_str(${c.qualify(s.target_expr, true)})\n}\n\n')
+			b.write_string('fn ${lower}_slot${i}_set(ctxp voidptr, v string) {\n${cast}')
+			b.write_string('\t${c.qualify(s.target_expr, false)}.set(v)\n}\n\n')
 		}
 		.cond {
-			b.write_string('\truntime.bind_if(mut ins, ${i}, fn [mut ${recv}] () bool { return ${c.qualify(s.cond_expr,
-				true)} })\n')
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) bool {\n${cast}')
+			b.write_string('\treturn ${c.qualify(s.cond_expr, true)}\n}\n\n')
 		}
 		.list {
-			b.write_string('\truntime.bind_list(mut ins, ${i}, fn [mut ${recv}] () int { return ${c.qualify(s.source_expr,
-				true)}.len })\n')
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) int {\n${cast}')
+			b.write_string('\treturn ${c.qualify(s.source_expr, true)}.len\n}\n\n')
 		}
 	}
 }
