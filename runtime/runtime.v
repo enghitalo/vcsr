@@ -96,10 +96,23 @@ mut:
 	effects []&vcsr.Effect
 }
 
-// View is the live root handed back by view(). `.html()` serializes it (tests/SSR).
+// View is the live root handed back by view(), carrying the effects its slot
+// bindings created so an owner (the App) can dispose them on unmount/re-render.
+// `.html()` serializes it (tests/SSR).
 pub struct View {
 pub:
 	root &Node
+mut:
+	effects []&vcsr.Effect
+}
+
+// dispose detaches every effect this view's slot bindings created — the View-level
+// teardown the App calls when it drops or replaces a view.
+pub fn (mut v View) dispose() {
+	for mut e in v.effects {
+		e.dispose()
+	}
+	v.effects = []
 }
 
 // instance clones the skeleton and resolves every slot node. The receiver is by
@@ -117,10 +130,11 @@ pub fn (t Template) instance() Instance {
 	}
 }
 
-// view hands back the live root.
+// view hands back the live root plus the effects to dispose on teardown.
 pub fn (mut ins Instance) view() View {
 	return View{
-		root: ins.root
+		root:    ins.root
+		effects: ins.effects
 	}
 }
 
