@@ -10,7 +10,7 @@
 module main
 
 import vcsr.bundle { Bundle }
-import vanilla.static_assets
+import enghitalo.vanilla.static_assets
 
 const dist = 'testdata/fixture-app/dist'
 

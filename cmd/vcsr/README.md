@@ -5,7 +5,7 @@ The command-line front door to the implemented compiler. The pipeline (phases
 
 ## Build & install
 
-`vcsr` imports `vcsr.*` and (for `serve`) `vanilla.server`/`vanilla.static_assets`,
+`vcsr` imports `vcsr.*` and (for `serve`) `enghitalo.vanilla.server`/`.static_assets`,
 so both the `vcsr` and `vanilla` modules must be on V's module path:
 
 ```sh

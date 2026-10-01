@@ -34,9 +34,9 @@ threads:
 The whole request handler is one `respond_into` call:
 
 ```v
-import vanilla.core
-import vanilla.http1_1.response
-import vanilla.static_assets
+import enghitalo.vanilla.core
+import enghitalo.vanilla.http1_1.response
+import enghitalo.vanilla.static_assets
 
 // Built ONCE at boot from the dist/ directory; immutable and lock-free after.
 const assets = static_assets.new(static_assets.Config{
@@ -145,7 +145,7 @@ A `static_assets` module (works on top of the existing raw `handle_request`
 contract — pure, socket-free, E2E-testable like the rest of vanilla):
 
 ```v
-import vanilla.http_server.static_assets
+import enghitalo.vanilla.http_server.static_assets
 
 // Built once at boot from a directory (optionally a manifest the build emits).
 mut assets := static_assets.new(static_assets.Config{
