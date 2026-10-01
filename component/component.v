@@ -226,6 +226,9 @@ pub fn (c &Component) codegen() !Generated {
 	b.write_string('\tslots: [\n')
 	for s in c.tmpl.slots {
 		b.write_string('\t\truntime.SlotDesc{ kind: .${slot_kind_name(s.kind)}, path: ${render_path(s.path)}')
+		if s.anchor >= 0 {
+			b.write_string(', anchor: ${s.anchor}')
+		}
 		if s.name != '' {
 			b.write_string(", name: '${esc(s.name)}'")
 		}
@@ -260,7 +263,7 @@ pub fn (c &Component) codegen() !Generated {
 	return Generated{
 		filename:              '${lower}.gen.v'
 		source:                source
-		compiles_with_stock_v: !source.contains('\$') // no comptime builtin → stock V compiles it
+		compiles_with_stock_v: !has_comptime_builtin(source) // no `$vui`/`$css`/… → stock V compiles it
 	}
 }
 
@@ -303,7 +306,7 @@ fn (c &Component) emit_slot_helper(mut b strings.Builder, i int, s slots.SlotDes
 	match s.kind {
 		.text {
 			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
-			b.write_string('\treturn runtime.to_str(${c.qualify(s.expr, true)})\n}\n\n')
+			b.write_string('\treturn ${c.text_value(s)}\n}\n\n')
 		}
 		.attr {
 			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
@@ -334,64 +337,70 @@ fn (c &Component) emit_slot_helper(mut b strings.Builder, i int, s slots.SlotDes
 	}
 }
 
+// text_value renders a text slot's value as a V string expression: its literal
+// parts and the `runtime.to_str` of each interpolated expression, concatenated.
+fn (c &Component) text_value(s slots.SlotDesc) string {
+	mut pieces := []string{}
+	for part in s.parts {
+		if part.is_expr {
+			pieces << 'runtime.to_str(${c.qualify(part.text, true)})'
+		} else if part.text != '' {
+			pieces << "'${esc(part.text)}'"
+		}
+	}
+	if pieces.len == 0 {
+		return "''"
+	}
+	return pieces.join(' + ')
+}
+
 // qualify rewrites a template expression's free identifiers into receiver-scoped
 // V: a signal field becomes `recv.name.get()` in a value context (or `recv.name`
 // in a call context, so `.set(…)` chains), a plain field/method becomes
 // `recv.name`, and anything else (a @for loop variable, an external) is left as
-// is. Member tails and string literals are passed through untouched.
+// is. It works on bind.tokens, so member tails, literals, keywords and builtin
+// type names pass through untouched, and identifiers inside `${}` string
+// interpolations are qualified too.
 fn (c &Component) qualify(expr string, value_ctx bool) string {
 	recv := c.recv()
-	mut out := ''
-	mut i := 0
-	for i < expr.len {
-		ch := expr[i]
-		if ch == `'` || ch == `"` {
-			q := ch
-			out += expr[i..i + 1]
-			i++
-			for i < expr.len && expr[i] != q {
-				out += expr[i..i + 1]
-				i++
-			}
-			if i < expr.len {
-				out += expr[i..i + 1]
-				i++
-			}
+	toks := bind.tokens(expr)
+	mut out := strings.new_builder(expr.len + 16)
+	for i, t in toks {
+		if t.kind != .ident {
+			out.write_string(t.text)
 			continue
 		}
-		if is_ident_start(ch) {
-			start := i
-			i++
-			for i < expr.len && is_ident_part(expr[i]) {
-				i++
-			}
-			name := expr[start..i]
-			preceded_by_dot := start > 0 && expr[start - 1] == `.`
-			if preceded_by_dot || name in ['true', 'false', 'none'] {
-				out += name
-			} else if c.is_signal(name) {
-				out += '${recv}.${name}' + if value_ctx { '.get()' } else { '' }
-			} else if c.has_method(name) && !c.is_field(name) {
-				// A computed: a bare method in a value context is CALLED
-				// (`{{ doubled }}` → `c.doubled()`), unless the template already
-				// wrote the parens; in an event context it stays a method value.
-				already_called := i < expr.len && expr[i] == `(`
-				if value_ctx && !already_called {
-					out += '${recv}.${name}()'
-				} else {
-					out += '${recv}.${name}'
-				}
-			} else if c.is_field(name) || c.has_method(name) {
-				out += '${recv}.${name}'
+		name := t.text
+		if c.is_signal(name) {
+			out.write_string('${recv}.${name}' + if value_ctx { '.get()' } else { '' })
+		} else if c.has_method(name) && !c.is_field(name) {
+			// A computed: a bare method in a value context is CALLED
+			// (`{{ doubled }}` → `c.doubled()`), unless the template already
+			// wrote the parens; in an event context it stays a method value.
+			if value_ctx && !next_is_call(toks, i) {
+				out.write_string('${recv}.${name}()')
 			} else {
-				out += name // loop variable or external symbol
+				out.write_string('${recv}.${name}')
 			}
+		} else if c.is_field(name) {
+			out.write_string('${recv}.${name}')
+		} else {
+			out.write_string(name) // loop variable or external symbol
+		}
+	}
+	return out.str()
+}
+
+// next_is_call reports whether the token after `i` (skipping spaces) opens a
+// call: `doubled ()`.
+fn next_is_call(toks []bind.Token, i int) bool {
+	for k := i + 1; k < toks.len; k++ {
+		if toks[k].kind == .space {
 			continue
 		}
-		out += expr[i..i + 1]
-		i++
+		return toks[k].kind == .punct && toks[k].text == '('
 	}
-	return out
+	return false
 }
 
 fn (c &Component) recv() string {
@@ -439,7 +448,7 @@ fn parse_logic(src string) !(string, []Field, []string) {
 		j++
 	}
 	ns := j
-	for j < src.len && is_ident_part(src[j]) {
+	for j < src.len && bind.is_ident_part(src[j]) {
 		j++
 	}
 	name := src[ns..j]
@@ -494,7 +503,7 @@ fn parse_fields(body string) []Field {
 			p++
 		}
 		fname := line[0..p]
-		if fname == '' || !is_ident_start(fname[0]) {
+		if fname == '' || !bind.is_ident_start(fname[0]) {
 			continue
 		}
 		for p < line.len && is_space(line[p]) {
@@ -572,7 +581,7 @@ fn parse_methods(src string, struct_name string) []string {
 			m++
 		}
 		mstart := m
-		for m < src.len && is_ident_part(src[m]) {
+		for m < src.len && bind.is_ident_part(src[m]) {
 			m++
 		}
 		mname := src[mstart..m]
@@ -616,11 +625,11 @@ fn scope_css(name string, css string) string {
 			i++
 			continue
 		}
-		if depth == 0 && ch == `.` && i + 1 < css.len && is_ident_start(css[i + 1]) {
+		if depth == 0 && ch == `.` && i + 1 < css.len && bind.is_ident_start(css[i + 1]) {
 			out += '.'
 			i++
 			start := i
-			for i < css.len && (is_ident_part(css[i]) || css[i] == `-`) {
+			for i < css.len && (bind.is_ident_part(css[i]) || css[i] == `-`) {
 				i++
 			}
 			out += css[start..i] + suffix
@@ -674,17 +683,30 @@ fn render_path(p []int) string {
 	return '[' + parts.join(', ') + ']'
 }
 
-// esc makes `s` safe to embed inside a single-quoted V string literal.
+// esc makes `s` safe to embed inside a single-quoted V string literal: escapes
+// backslashes, quotes, and `$` (which would otherwise start an interpolation).
 fn esc(s string) string {
-	return s.replace('\\', '\\\\').replace("'", "\\'")
+	return s.replace('\\', '\\\\').replace("'", "\\'").replace('$', '\\$')
+}
+
+// has_comptime_builtin reports whether V source uses a compile-time builtin
+// (`$vui`, `$embed_file`, `$if`, …): a `$` followed by a letter. A `${…}`
+// interpolation and an escaped `\$` are not builtins.
+fn has_comptime_builtin(src string) bool {
+	for i := 0; i + 1 < src.len; i++ {
+		if src[i] == `$` && (i == 0 || src[i - 1] != `\\`) && bind.is_ident_start(src[i + 1]) {
+			return true
+		}
+	}
+	return false
 }
 
 fn is_bare_ident(s string) bool {
-	if s == '' || !is_ident_start(s[0]) {
+	if s == '' || !bind.is_ident_start(s[0]) {
 		return false
 	}
 	for ch in s {
-		if !is_ident_part(ch) {
+		if !bind.is_ident_part(ch) {
 			return false
 		}
 	}
@@ -693,14 +715,6 @@ fn is_bare_ident(s string) bool {
 
 fn is_space(c u8) bool {
 	return c == ` ` || c == `\t` || c == `\n` || c == `\r`
-}
-
-fn is_ident_start(c u8) bool {
-	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || c == `_`
-}
-
-fn is_ident_part(c u8) bool {
-	return is_ident_start(c) || (c >= `0` && c <= `9`)
 }
 
 fn index_of(s string, sub string, from int) int {
@@ -726,9 +740,9 @@ fn find_word_from(src string, word string, from int) int {
 		if idx < 0 {
 			return -1
 		}
-		before_ok := idx == 0 || !is_ident_part(src[idx - 1])
+		before_ok := idx == 0 || !bind.is_ident_part(src[idx - 1])
 		after := idx + word.len
-		after_ok := after >= src.len || !is_ident_part(src[after])
+		after_ok := after >= src.len || !bind.is_ident_part(src[after])
 		if before_ok && after_ok {
 			return idx
 		}

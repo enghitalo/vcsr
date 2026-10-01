@@ -13,8 +13,18 @@
 const td = new TextDecoder();
 const te = new TextEncoder();
 
+// nthComment returns the k-th comment child of `el` — a slot anchor (`<!---->`).
+function nthComment(el, k) {
+  let seen = 0;
+  for (const n of el.childNodes) {
+    if (n.nodeType === Node.COMMENT_NODE && seen++ === k) return n;
+  }
+  throw new Error(`vcsr: anchor ${k} not found in <${el.localName}>`);
+}
+
 export async function boot(wasmUrl = './core.wasm') {
   let exp = null;
+  let dispatch, inputPtr, dispatchInput;   // the module's callbacks (host_init)
   const mem = () => exp.memory;
   const rd = (p, l) => td.decode(new Uint8Array(mem().buffer, p, l));
 
@@ -22,6 +32,11 @@ export async function boot(wasmUrl = './core.wasm') {
   const ref = (o) => { H.push(o); return H.length - 1; };
 
   const env = {
+    // the module's callback entry points arrive as function-table indices
+    host_init(d, ip, di) {
+      const t = exp.__indirect_function_table;
+      dispatch = t.get(d); inputPtr = t.get(ip); dispatchInput = t.get(di);
+    },
     // templates: the host's HTML parser builds each skeleton once
     host_register_template(p, l) {
       const t = document.createElement('template');
@@ -36,19 +51,27 @@ export async function boot(wasmUrl = './core.wasm') {
       for (let k = 0; k < n; k++) cur = cur.children[dv.getInt32(pathPtr + k * 4, true)];
       return ref(cur);
     },
+    // anchors: the k-th comment child of a node, or a text node placed before it
+    host_anchor_at(h, k) { return ref(nthComment(H[h], k)); },
+    host_anchor_text(h, k) {
+      const a = nthComment(H[h], k);
+      const t = document.createTextNode('');
+      a.parentNode.insertBefore(t, a);
+      return ref(t);
+    },
     // patches
     host_set_text(h, p, l) { H[h].textContent = rd(p, l); },
     host_set_attr(h, np, nl, vp, vl) { H[h].setAttribute(rd(np, nl), rd(vp, vl)); },
     host_set_value(h, p, l) { H[h].value = rd(p, l); },
     host_set_visible(h, v) { H[h].style.display = v ? '' : 'none'; },
     // events: the module is called back by index; default actions are left alone
-    host_on(h, ep, el, cb) { H[h].addEventListener(rd(ep, el), () => exp.vcsr_dispatch(cb)); },
+    host_on(h, ep, el, cb) { H[h].addEventListener(rd(ep, el), () => dispatch(cb)); },
     host_on_input(h, cb) {
       H[h].addEventListener('input', (e) => {
         const b = te.encode(e.target.value ?? '');
-        const p = exp.vcsr_input_ptr(b.length);
+        const p = inputPtr(b.length);
         new Uint8Array(mem().buffer).set(b, p);
-        exp.vcsr_dispatch_input(cb, p, b.length);
+        dispatchInput(cb, p, b.length);
       });
     },
     host_mount(root, sp, sl) {

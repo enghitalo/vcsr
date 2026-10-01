@@ -148,3 +148,29 @@ fn test_plan_uses_helper() {
 	assert p.uses('count')
 	assert !p.uses('nope')
 }
+
+// --- the shared expression lexer (bind.tokens) --------------------------------
+
+fn test_lexer_is_lossless() {
+	for e in ['a + b', "'it\\'s \${x}' + y", 'int(n) < 1e5 && m.len > 0x_ff', '`c` == r', '0..n'] {
+		assert bind.tokens(e).map(it.text).join('') == e
+	}
+}
+
+fn test_free_idents_skips_literals_keywords_and_members() {
+	assert bind.free_idents('count < 10') == ['count']
+	assert bind.free_idents('1e5 + 0xff + 1_000 + 3.14 + 2e-3') == []
+	assert bind.free_idents('int(x) + i64(y)') == ['x', 'y']
+	assert bind.free_idents('if on { a } else { b }') == ['on', 'a', 'b']
+	assert bind.free_idents('item.name in names') == ['item', 'names']
+	assert bind.free_idents('items.filter(it.done).len') == ['items']
+	assert bind.free_idents('0..n') == ['n']
+	assert bind.free_idents('`c` == r') == ['r']
+}
+
+fn test_free_idents_sees_inside_string_interpolation_and_past_escapes() {
+	assert bind.free_idents("'it\\'s' + w") == ['w']
+	assert bind.free_idents("'Hi \${name}, you have \${count + 1}' + tail") == ['name', 'count',
+		'tail']
+	assert bind.free_idents("'\${user.name}'") == ['user']
+}

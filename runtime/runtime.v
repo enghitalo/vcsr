@@ -41,9 +41,10 @@ pub enum SlotKind {
 // codegen, so every field is pub and the shape is frozen.
 pub struct SlotDesc {
 pub:
-	kind SlotKind
-	path []int  // element-child-index path from the clone root
-	name string // attribute name (attr) or event name (event); else ''
+	kind   SlotKind
+	path   []int // element-child-index path from the clone root
+	anchor int = -1 // >= 0: the slot is the anchor-th comment child of `path` (see slots.anchor_html)
+	name   string // attribute name (attr) or event name (event); else ''
 }
 
 // Template is a component's compiled form: the static skeleton + the slot table.

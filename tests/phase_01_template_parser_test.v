@@ -67,10 +67,12 @@ fn test_skips_leading_comment() {
 	assert tree.root.tag == 'div'
 }
 
-fn test_skips_child_comment() {
+fn test_child_comment_is_kept_as_a_comment_node() {
+	// kept in the AST (so skeleton anchors survive a re-parse); slots drops it
 	tree := parse('<div><!-- note --><span>x</span></div>')
-	assert tree.root.children.len == 1
-	assert tree.root.children[0].tag == 'span'
+	assert tree.root.children.len == 2
+	assert tree.root.children[0].kind == .comment
+	assert tree.root.children[1].tag == 'span'
 }
 
 // --- interpolation ----------------------------------------------------------
@@ -258,4 +260,71 @@ fn test_rejects_empty_template() {
 		return
 	}
 	assert false, 'expected an error for an empty template'
+}
+
+// --- HTML rules: text vs markup, void elements, whitespace, errors ----------
+
+fn test_lt_inside_interpolation_and_bare_lt_are_text() {
+	tree := parse('<p>{{ count < 10 }} and 1 < 2</p>')
+	assert tree.root.children.len == 2
+	assert tree.root.children[0].expr == 'count < 10'
+	assert tree.root.children[1].text == ' and 1 < 2'
+}
+
+fn test_void_elements_need_no_closing_tag() {
+	tree := parse('<form><input @bind="name"><br><img src="a.png"></form>')
+	assert tree.root.children.map(it.tag) == ['input', 'br', 'img']
+	assert tree.root.children[0].binding or { panic('no @bind') }.target_expr == 'name'
+}
+
+fn test_pretty_printing_whitespace_is_condensed_away() {
+	tree := parse('<p>\n    {{ x }}\n</p>')
+	assert tree.root.children.len == 1
+	assert tree.root.children[0].kind == .interpolation
+}
+
+fn test_text_whitespace_runs_collapse_to_one_space() {
+	tree := parse('<p>Hello\n      {{ name }}  !</p>')
+	assert tree.root.children[0].text == 'Hello '
+	assert tree.root.children[2].text == ' !'
+}
+
+fn test_unquoted_attribute_value_may_contain_slashes() {
+	tree := parse('<a href=/docs/intro>x</a>')
+	assert tree.root.attr('href') or { '' } == '/docs/intro'
+}
+
+fn test_for_accepts_any_whitespace_around_in() {
+	tree := parse('<ul><li @for="item\tin  items">x</li></ul>')
+	e := tree.root.children[0].each or { panic('no @for') }
+	assert e.item_name == 'item' && e.source_expr == 'items'
+}
+
+fn expect_error(src string, wants ...string) {
+	parser.parse_template(src) or {
+		for w in wants {
+			assert err.msg().contains(w), 'error "${err.msg()}" should mention "${w}"'
+		}
+		return
+	}
+	assert false, 'expected "${src}" to fail'
+}
+
+fn test_errors_report_line_and_column() {
+	expect_error('<div>\n  <p></span>\n</div>', 'mismatched', 'line 2, col 6')
+}
+
+fn test_content_after_the_root_is_an_error() {
+	expect_error('<div></div><p>lost</p>', 'after the root')
+}
+
+fn test_unterminated_interpolation_is_an_error() {
+	expect_error('<p>{{ x </p>', 'unterminated {{')
+}
+
+fn test_handler_and_directive_values_are_required() {
+	expect_error('<button @click>x</button>', '@click', 'handler')
+	expect_error('<p @if="">x</p>', '@if')
+	expect_error('<p class:="on">x</p>', 'class:')
+	expect_error('<li @for="(i, x) in xs">x</li>', '@for')
 }
