@@ -27,6 +27,7 @@ fn C.host_set_visible(node int, visible int)
 fn C.host_on(node int, ev &u8, el int, cb_idx int)
 fn C.host_on_input(node int, cb_idx int)
 fn C.host_mount(root int, sel &u8, len int)
+fn C.host_init(dispatch voidptr, input_ptr voidptr, dispatch_input voidptr)
 
 // Instance is one clone of a template: the host root handle, the resolved slot
 // node handles (by element-child path), and the effects its bindings created.
@@ -57,6 +58,7 @@ pub fn (mut v View) dispose() {
 // can't run on wasm), clones it, and resolves each slot's node handle by walking
 // the element-child path host-side.
 pub fn (t Template) instance() Instance {
+	init_host()
 	tpl := C.host_register_template(t.html.str, t.html.len)
 	root := C.host_clone(tpl)
 	mut slots := []int{cap: t.slots.len}
@@ -214,6 +216,20 @@ pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr
 
 // --- event dispatch: host → wasm callbacks via integer indices --------------
 
+// The host calls back into the module through three entry points. They are
+// handed over as FUNCTION POINTERS (on wasm32: indices into the exported
+// indirect function table), not looked up as named exports: V v3 drops — or
+// emits only under a mangled C name — the `@[export]` fns of an imported module
+// (the runtime is `vcsr.runtime` in any app outside the vcsr tree), and taking
+// their address is also what keeps them alive through V's dead-code pass.
+fn init_host() {
+	if vcsr_host_ready {
+		return
+	}
+	vcsr_host_ready = true
+	C.host_init(voidptr(vcsr_dispatch), voidptr(vcsr_input_ptr), voidptr(vcsr_dispatch_input))
+}
+
 struct HandlerReg {
 	run fn (ctx voidptr) = unsafe { nil }
 	ctx voidptr
@@ -225,6 +241,7 @@ struct InputReg {
 }
 
 __global (
+	vcsr_host_ready    bool
 	vcsr_wasm_handlers []HandlerReg
 	vcsr_wasm_inputs   []InputReg
 	vcsr_input_buf     []u8
@@ -242,7 +259,6 @@ pub fn bind_event_ctx(mut ins Instance, i int, ctx voidptr, handler fn (ctx void
 }
 
 // vcsr_dispatch is the host's entry point when a registered DOM event fires.
-@[export: 'vcsr_dispatch']
 pub fn vcsr_dispatch(idx int) {
 	if idx < 0 || idx >= vcsr_wasm_handlers.len {
 		return
@@ -255,7 +271,6 @@ pub fn vcsr_dispatch(idx int) {
 
 // vcsr_input_ptr returns a scratch buffer (≥ need bytes) the host writes a new
 // two-way value into before calling vcsr_dispatch_input.
-@[export: 'vcsr_input_ptr']
 pub fn vcsr_input_ptr(need int) int {
 	if vcsr_input_buf.len < need {
 		vcsr_input_buf = []u8{len: need}
@@ -265,7 +280,6 @@ pub fn vcsr_input_ptr(need int) int {
 
 // vcsr_dispatch_input is the host's entry point on a two-way input event: it reads
 // the new value (written at ptr,len) and runs the registered writer.
-@[export: 'vcsr_dispatch_input']
 pub fn vcsr_dispatch_input(idx int, ptr &u8, len int) {
 	if idx < 0 || idx >= vcsr_wasm_inputs.len {
 		return

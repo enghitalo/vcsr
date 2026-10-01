@@ -28,5 +28,9 @@ VCSR_IMPORT(host_on_input) void host_on_input(int node, int cb_idx);
 
 // mount the cloned root into document.querySelector(sel)
 VCSR_IMPORT(host_mount) void host_mount(int root, const unsigned char* sel, int len);
+// called once, before any other import: the module's callback entry points as
+// function pointers (indirect-function-table indices) — vcsr_dispatch(int),
+// vcsr_input_ptr(int) -> int, vcsr_dispatch_input(int, ptr, len)
+VCSR_IMPORT(host_init) void host_init(void* dispatch, void* input_ptr, void* dispatch_input);
 
 #endif
