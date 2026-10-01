@@ -35,7 +35,7 @@ module vcsr
 // (a plain function-table index, so it works on wasm).
 struct Cleanup {
 	sig    voidptr
-	detach fn (sig voidptr, e &Effect)
+	detach fn (sig voidptr, e &Effect) = unsafe { nil }
 }
 
 // ClosureBox keeps a closure alive behind the closure-FREE Effect.action ABI, so
@@ -218,9 +218,19 @@ fn run_tracked(mut e Effect) {
 		c.detach(c.sig, e)
 	}
 	e.cleanups = []
-	vcsr_effect_stack << e
+	push_effect(e)
 	e.action(e.ctx)
 	vcsr_effect_stack.pop()
+}
+
+// push_effect makes `e` the running effect. It takes `&Effect` rather than
+// pushing the `mut e Effect` param directly: V's transformer can mistake that
+// param for a by-value Effect when a generic `Signal[T]` method calling
+// run_tracked is instantiated from another module, and "heap-escape" it into a
+// garbage copy (memdup of the pointer variable) — so `get()` would subscribe
+// that copy instead of `e`, and the next `set()` calls a nil action.
+fn push_effect(e &Effect) {
+	vcsr_effect_stack << e
 }
 
 // dispose detaches the effect from every signal it reads and stops it re-running.
