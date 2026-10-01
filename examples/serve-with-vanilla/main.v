@@ -9,10 +9,10 @@
 //   3. ../../testdata/fixture-app/dist  (built from its committed build/ wasm if absent)
 module main
 
-import vanilla.core
-import vanilla.http1_1.response
-import vanilla.server
-import vanilla.static_assets
+import enghitalo.vanilla.core
+import enghitalo.vanilla.http1_1.response
+import enghitalo.vanilla.server
+import enghitalo.vanilla.static_assets
 import vcsr.bundle
 import os
 

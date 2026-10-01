@@ -188,9 +188,9 @@ boot, precomputes a response for every asset, and shares it lock-free across
 workers:
 
 ```v
-import vanilla.core
-import vanilla.http1_1.response
-import vanilla.static_assets
+import enghitalo.vanilla.core
+import enghitalo.vanilla.http1_1.response
+import enghitalo.vanilla.static_assets
 
 // Built once at boot from the dist/ vcsr emitted; immutable afterwards.
 const assets = static_assets.new(static_assets.Config{
@@ -212,7 +212,7 @@ fn handle(req []u8, mut out []u8, _client_fd int, _worker_state voidptr, mut _ev
 }
 ```
 
-Pass `handle` as `server.ServerConfig.handler` (`import vanilla.server`) — see
+Pass `handle` as `server.ServerConfig.handler` (`import enghitalo.vanilla.server`) — see
 [examples/serve-with-vanilla](examples/serve-with-vanilla/main.v).
 
 What `static_assets` guarantees (and what vcsr's `dist/` is built to satisfy):

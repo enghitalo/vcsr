@@ -20,10 +20,10 @@ module main
 import os
 import vcsr.bundle
 import vcsr.component
-import vanilla.core
-import vanilla.http1_1.response
-import vanilla.server
-import vanilla.static_assets
+import enghitalo.vanilla.core
+import enghitalo.vanilla.http1_1.response
+import enghitalo.vanilla.server
+import enghitalo.vanilla.static_assets
 
 const version = '0.0.1'
 
