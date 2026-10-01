@@ -176,7 +176,7 @@ dist/
 └── manifest.json           vcsr's build record: { hash, route?, preload } — drives the loader
 ```
 
-vanilla's `http_server.static_assets` serves this `dist/` directly: it answers
+vanilla's `static_assets` module serves this `dist/` directly: it answers
 each request with the correct `Content-Type` (notably `application/wasm`,
 required for `instantiateStreaming`), `Content-Encoding` (negotiated from
 `Accept-Encoding`), `Cache-Control` (immutable for hashed assets, `no-cache` for

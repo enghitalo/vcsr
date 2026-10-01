@@ -5,12 +5,12 @@ The command-line front door to the implemented compiler. The pipeline (phases
 
 ## Build & install
 
-`vcsr` imports `vcsr.*` and (for `serve`) `vanilla.http_server`, so both the
-`vcsr` and `vanilla` modules must be on V's module path:
+`vcsr` imports `vcsr.*` and (for `serve`) `vanilla.server`/`vanilla.static_assets`,
+so both the `vcsr` and `vanilla` modules must be on V's module path:
 
 ```sh
 ln -s "$PWD" ~/.vmodules/vcsr               # import vcsr.*
-ln -s /path/to/vanilla ~/.vmodules/vanilla  # for `serve` (vanilla.http_server)
+v install enghitalo.vanilla                 # for `serve` (vanilla.server)
 
 make install        # build + install to ~/.local/bin/vcsr (override PREFIX=)
 make build          # just build in place → cmd/vcsr/vcsr

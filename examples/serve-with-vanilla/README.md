@@ -17,7 +17,8 @@ VCSR_DIST=testdata/dashboard-app/dist  v run examples/serve-with-vanilla/main.v
 
 It resolves the bundle in order: `$VCSR_DIST` → `./dist` → the fixture app, which
 it **builds on the fly** if its (generated, un-committed) `dist/` is absent. Needs
-`vanilla` on V's module path — `ln -s /path/to/vanilla ~/.vmodules/vanilla`.
+`vanilla` on V's module path — `v install enghitalo.vanilla` (or
+`ln -s /path/to/vanilla ~/.vmodules/vanilla`).
 
 > The `vcsr build` CLI is the remaining roadmap; today the bundle is produced by
 > a library call — `bundle.build('testdata/fixture-app', release: true)` writes a
@@ -28,7 +29,7 @@ it **builds on the fly** if its (generated, un-committed) `dist/` is absent. Nee
 
 [main.v](main.v) is the whole integration: point `static_assets.new` at the
 `dist/` that `vcsr build` wrote, then call `assets.respond_into(req, mut out)`
-from vanilla's request handler. `http_server.static_assets` handles the parts
+from vanilla's request handler. `vanilla.static_assets` handles the parts
 that are easy to get subtly wrong:
 
 - `*.wasm` → `Content-Type: application/wasm` (required for

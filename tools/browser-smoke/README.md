@@ -56,7 +56,7 @@ This harness is **one Node process** that holds *both* the static file server
 driver, plus a hard 60-second self-timeout. So at any instant there is exactly
 **one server and one browser**, and both die when the process exits.
 
-It deliberately does **not** use vanilla's `http_server` to serve the bundle for
+It deliberately does **not** use vanilla's `server` to serve the bundle for
 this test: that server spawns a busy-polling worker **per CPU core**, and
 launching it repeatedly (or not reaping it) pins every core. The HTTP-level
 serving contract is already covered, socket-free, by phase 10.

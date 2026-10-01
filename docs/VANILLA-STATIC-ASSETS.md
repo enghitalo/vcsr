@@ -1,8 +1,9 @@
-# Serving vcsr bundles: vanilla's `http_server.static_assets`
+# Serving vcsr bundles: vanilla's `static_assets`
 
 > **Status: IMPLEMENTED upstream.** This began as a vcsr feature request and is
 > now shipped in vanilla — [issue #19][issue] was closed by [commit 50df944][commit]
-> as the `http_server.static_assets` module (plus zero-copy `sendfile(2)`). vcsr
+> as the `static_assets` module (plus zero-copy `sendfile(2)`; originally
+> `http_server.static_assets`, hoisted to `vanilla.static_assets` since). vcsr
 > **targets** this module: `vcsr build` emits a `dist/` bundle that
 > `static_assets` serves directly — vcsr ships no server of its own. The original
 > upstream proposal is preserved at the bottom for provenance.
@@ -12,7 +13,7 @@
 
 ## What vanilla now provides
 
-`http_server.static_assets` turns a built SPA bundle directory into a lock-free
+`vanilla.static_assets` turns a built SPA bundle directory into a lock-free
 asset server with an allocation-free hot path. Built once at boot from
 `root: 'dist'`, it precomputes a ready-to-send HTTP response for every asset and
 every precompressed representation, then shares them immutably across all worker
@@ -30,11 +31,12 @@ threads:
 - **Zero-copy `sendfile(2)`** for bodies ≥ `sendfile_min_bytes` (default 256 KiB),
   used via `respond_into`, with a buffered fallback on TLS / non-Linux backends.
 
-The whole request handler is two lines:
+The whole request handler is one `respond_into` call:
 
 ```v
-import vanilla.http_server
-import vanilla.http_server.static_assets
+import vanilla.core
+import vanilla.http1_1.response
+import vanilla.static_assets
 
 // Built ONCE at boot from the dist/ directory; immutable and lock-free after.
 const assets = static_assets.new(static_assets.Config{
@@ -43,13 +45,19 @@ const assets = static_assets.new(static_assets.Config{
 	//           precompressed = [.br, .gz], sendfile_min_bytes = 256 KiB
 }) or { panic(err) }
 
-fn handle(req []u8, _ int, mut out []u8) ! {
-	assets.respond_into(req, mut out)! // sendfile fast path; respond() is the pure-bytes API
+// a vanilla core.Handler — pass it as server.ServerConfig.handler
+fn handle(req []u8, mut out []u8, _client_fd int, _worker_state voidptr, mut _event_loop core.EventLoop) core.Step {
+	// sendfile fast path; respond() is the pure-bytes API
+	assets.respond_into(req, mut out) or {
+		out << response.tiny_bad_request_response
+		return .close
+	}
+	return .done
 }
 ```
 
-See vanilla's `examples/static_assets` and
-`http_server/static_assets/static_assets_test.v` for the full surface.
+See vanilla's `examples/spa_static_assets` and
+`static_assets/static_assets_test.v` for the full surface.
 
 ## vcsr's side of the contract
 
