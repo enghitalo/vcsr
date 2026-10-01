@@ -400,7 +400,7 @@ fn convert(n ast.Node) &Node {
 // node_at walks `path` down element children (text nodes don't count, matching
 // the element-child-index path scheme) from the clone root.
 fn node_at(root &Node, path []int) &Node {
-	mut cur := root
+	mut cur := unsafe { root } // only the pointer moves; nothing is written through it
 	for idx in path {
 		cur = element_child(cur, idx)
 	}
