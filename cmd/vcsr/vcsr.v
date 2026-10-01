@@ -123,12 +123,17 @@ fn do_wasm(rest []string) ! {
 	wasmfile := os.join_path(out, 'core.wasm')
 
 	// 1) V → C, host-owned-DOM backend (-d wasm_browser); strip Linux-only bits.
+	//    -arch wasm32: 32-bit int/pointers, and no x86 inline asm (math.bits).
 	run_step('V→C',
-		'${os.quoted_path(@VEXE)} -d wasm_browser -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler -enable-globals -cc clang -gc none -o ${os.quoted_path(cfile)} ${os.quoted_path(src)}')!
+		'${os.quoted_path(@VEXE)} -arch wasm32 -d wasm_browser -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler -enable-globals -cc clang -gc none -o ${os.quoted_path(cfile)} ${os.quoted_path(src)}')!
 
-	// 2) C → wasm, reactor model; -I runtime for vcsr_host.h.
+	// 2) C → wasm, reactor model; -I runtime for vcsr_host.h, -I wasi_compat for
+	//    the POSIX headers V's preamble includes but WASI lacks. Static data and
+	//    the stack start at 64 KiB because V's vmemcpy & co. treat any pointer
+	//    <= 0xFFFF as null (see runtime/wasi_compat/README.md).
+	compat_inc := os.join_path(runtime_inc, 'wasi_compat')
 	run_step('C→wasm',
-		'${os.quoted_path(clang)} --sysroot=${os.quoted_path(sysroot)} --target=wasm32-wasip1 -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -Wl,--strip-all -I ${os.quoted_path(runtime_inc)} -D_WASI_EMULATED_MMAN -lwasi-emulated-mman -D_WASI_EMULATED_SIGNAL -lwasi-emulated-signal -O3 -o ${os.quoted_path(wasmfile)} ${os.quoted_path(cfile)}')!
+		'${os.quoted_path(clang)} --sysroot=${os.quoted_path(sysroot)} --target=wasm32-wasip1 -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -Wl,--strip-all -Wl,--no-stack-first -Wl,--global-base=65536 -I ${os.quoted_path(compat_inc)} -I ${os.quoted_path(runtime_inc)} -D_WASI_EMULATED_MMAN -lwasi-emulated-mman -D_WASI_EMULATED_SIGNAL -lwasi-emulated-signal -D_WASI_EMULATED_PROCESS_CLOCKS -lwasi-emulated-process-clocks -O3 -o ${os.quoted_path(wasmfile)} ${os.quoted_path(cfile)}')!
 
 	os.rm(cfile) or {}
 	println('✓ ${wasmfile}  (${os.file_size(wasmfile)} B)')

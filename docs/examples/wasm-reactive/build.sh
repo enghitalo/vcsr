@@ -11,15 +11,21 @@ WASI_SDK="${WASI_SDK:-/opt/wasi-sdk}"
 
 # 1) V -> C. The -d flags drop Linux-only runtime bits absent on WASI; -gc none
 #    avoids the GC; -enable-globals because the reactive core uses a global.
-v -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler \
+#    -arch wasm32: 32-bit int/pointers and no x86 inline asm.
+REPO="$(cd ../../.. && pwd)"
+v -arch wasm32 -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler \
   -enable-globals -cc clang -gc none -o app.c app.v
 
 # 2) C -> wasm. Reactor model (exports _initialize); export all (V marks exports
 #    visibility=default); strip; emulate mman/signal libc bits.
+#    -I wasi_compat + data/stack above 64 KiB: see runtime/wasi_compat/README.md.
 "$WASI_SDK/bin/clang" --sysroot="$WASI_SDK/share/wasi-sysroot" --target=wasm32-wasip1 \
   -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -Wl,--strip-all \
+  -Wl,--no-stack-first -Wl,--global-base=65536 \
+  -I "$REPO/runtime/wasi_compat" \
   -D_WASI_EMULATED_MMAN -lwasi-emulated-mman \
   -D_WASI_EMULATED_SIGNAL -lwasi-emulated-signal \
+  -D_WASI_EMULATED_PROCESS_CLOCKS -lwasi-emulated-process-clocks \
   -O3 -o app.wasm app.c
 
 rm -f app.c

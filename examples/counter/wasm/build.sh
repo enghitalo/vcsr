@@ -13,15 +13,21 @@ WASI_SDK="${WASI_SDK:-/opt/wasi-sdk}"
 
 # 1) V -> C, with -d wasm_browser so the runtime compiles its host-owned-DOM
 #    backend (map-free, closure-free) instead of the native mock tree.
-( cd "$REPO" && v -d wasm_browser -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler \
+#    -arch wasm32: 32-bit int/pointers and no x86 inline asm.
+( cd "$REPO" && v -arch wasm32 -d wasm_browser -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler \
   -enable-globals -cc clang -gc none -o examples/counter/wasm/core.c examples/counter/src/ )
 
-# 2) C -> wasm. Reactor model; -I runtime for vcsr_host.h (the DOM-ABI prototypes).
+# 2) C -> wasm. Reactor model; -I runtime for vcsr_host.h (the DOM-ABI prototypes),
+#    -I runtime/wasi_compat for POSIX headers V includes but WASI lacks; data and
+#    stack above 64 KiB (V's vmemcpy treats pointers <= 0xFFFF as null) — see
+#    runtime/wasi_compat/README.md.
 "$WASI_SDK/bin/clang" --sysroot="$WASI_SDK/share/wasi-sysroot" --target=wasm32-wasip1 \
   -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -Wl,--strip-all \
-  -I "$REPO/runtime" \
+  -Wl,--no-stack-first -Wl,--global-base=65536 \
+  -I "$REPO/runtime/wasi_compat" -I "$REPO/runtime" \
   -D_WASI_EMULATED_MMAN -lwasi-emulated-mman \
   -D_WASI_EMULATED_SIGNAL -lwasi-emulated-signal \
+  -D_WASI_EMULATED_PROCESS_CLOCKS -lwasi-emulated-process-clocks \
   -O3 -o core.wasm core.c
 
 rm -f core.c
