@@ -8,7 +8,7 @@ ships an example under `examples/` whose README shows a screenshot taken by
 
 ## Milestone 1 — one honest pipeline
 
-- [ ] **1. One host loader + example runner** ★
+- [x] **1. One host loader + example runner** ★
   `runtime/vcsr_host.js` becomes the single, vcsr-owned implementation of the
   DOM ABI (rewritten on every `vcsr wasm`); the user's `app.js` shrinks to an
   import. Fix the unconditional `preventDefault()`. Retire the duplicate ABI

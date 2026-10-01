@@ -132,10 +132,10 @@ at all. See [WASM-PATHS-ANALYSIS.md](WASM-PATHS-ANALYSIS.md) §6 — Path 2
 >   `v -cc clang` + wasi-sdk (the recipe is now a CLI command).
 > - [examples/counter/wasm/](examples/counter/wasm/) — the **generated** counter
 >   component compiled to `core.wasm`, with a browser loader (`app.js`) + page.
->   Verified **in real headless Chromium** (`tools/browser-smoke/counter-smoke.mjs`):
+>   Verified **in real headless Chrome** (`make examples`, which runs
+>   `tools/browser-smoke/example.mjs` with [examples/counter/check.mjs](../examples/counter/check.mjs)):
 >   clicking the wasm-rendered `+1` button re-patches `<h1>`=count and
->   `<span>`=doubled (0→1→3 / 0→2→6) through the host DOM FFI — and in Node/V8
->   (`examples/counter/wasm/smoke.mjs`).
+>   `<span>`=doubled (0→1→3 / 0→2→6) through the host DOM FFI.
 >
 > `vcsr wasm <src>` now emits a complete, runnable bundle — `core.wasm` **plus** a
 > default `app.js` (DOM-ABI host loader + WASI shim) and `index.html` (it won't

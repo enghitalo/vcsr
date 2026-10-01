@@ -14,7 +14,7 @@ import http from 'node:http';
 import { readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from './launch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.VCSR_DIST || path.resolve(HERE, '../../testdata/dashboard-app/dist');
@@ -55,10 +55,7 @@ console.log('dashboard on', BASE);
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✅', m); } else { fail++; console.log('  ❌', m); } };
-const exe = ['/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(existsSync);
-const browser = await chromium.launch(exe
-  ? { executablePath: exe, headless: true, args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] }
-  : { headless: true });
+const browser = await launchChrome();
 const shot = (pg, n) => pg.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: true });
 
 try {

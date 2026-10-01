@@ -19,12 +19,13 @@ dist/
 *.so
 *.o
 
-# vcsr-generated component code (emitted from name.v/.html/.css triplets)
+# vcsr-generated component code (emitted from name.v/.html/.css triplets;
+# `vcsr wasm` and `make test` regenerate it, so tests always see current codegen)
 *.gen.v
-# ...except the counter example's, committed so the example compiles and its
-# integration test (counter_test.v) runs from a clean checkout without first
-# running `vcsr gen`. It also shows readers exactly what codegen emits.
-!examples/counter/src/counter.gen.v
+
+# `vcsr wasm` outputs next to each example's committed app.js/index.html
+examples/*/wasm/vcsr_host.js
+examples/*/wasm/core.c
 
 # built vcsr CLI binary
 cmd/vcsr/vcsr

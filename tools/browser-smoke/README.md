@@ -10,8 +10,14 @@ It's the live proof of the core thesis: `index.html` ships an **empty
 hands its **embedded HTML skeleton** (verbatim bytes from the wasm data segment)
 across the host boundary → the host injects it into the DOM.
 
-Two harnesses:
+Harnesses:
 
+- **`example.mjs`** — any wasm example under `examples/`: serves
+  `examples/<name>/wasm`, waits for the mount, runs the example's own
+  `check.mjs` (real clicks/typing + assertions), fails on any page or console
+  error, and writes the README screenshot (`examples/<name>/screenshot.png`,
+  framed around `#app`). `make examples` / `make screenshots` run it for every
+  example.
 - **`browser-smoke.mjs`** — the minimal `testdata/fixture-app` (18 checks).
 - **`dashboard-smoke.mjs`** — the complex `testdata/dashboard-app` ("vcsr
   console"): a C→wasm32 app on the integer-handle DOM runtime exercising
@@ -27,8 +33,8 @@ A `dist/` is vcsr-generated output and isn't committed, so build one first
 fixture's `dist/`). Then:
 
 ```sh
-cd tools/browser-smoke
-npm install                 # installs Playwright (the run uses your system Chrome)
+make browser-deps           # npm ci here: Playwright only — the run drives your installed Chrome
+node example.mjs ../../examples/counter   # after `vcsr wasm examples/counter/src`
 node browser-smoke.mjs      # serves ../../testdata/fixture-app/dist, drives Chrome, asserts, screenshots
 node dashboard-smoke.mjs    # the complex dashboard app (vcsr build testdata/dashboard-app first)
 ```
@@ -37,8 +43,9 @@ Exit code `0` means all checks passed. Screenshots land in `screenshots/`. Each
 harness prints a clear "no bundle — build first" message if its `dist/` is absent.
 
 - `VCSR_DIST=/abs/path/to/dist` — point it at a different built bundle.
-- `CHROME_BIN=/usr/bin/chromium` — choose the browser binary. If none is found
-  it falls back to Playwright's bundled Chromium (`npx playwright install chromium`).
+- `CHROME_BIN=/usr/bin/chromium` — choose the browser binary ([launch.mjs](launch.mjs),
+  shared by every harness). If none is found it falls back to Playwright's
+  bundled Chromium (`npx playwright install chromium`).
 
 ## What it checks (18)
 

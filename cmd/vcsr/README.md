@@ -29,8 +29,8 @@ binary atomically (build to a temp, then rename), so it's safe to run in place.
 ## Commands
 
 ```
-vcsr gen    <triplet>           generate <name>.gen.v from a .v/.html/.css triplet
-vcsr wasm   <src> [--out DIR]   compile a component src dir → core.wasm (v -cc clang)
+vcsr gen    <triplet|dir>       generate <name>.gen.v for a triplet (or each in a dir)
+vcsr wasm   <src> [--out DIR]   gen + compile a component src dir → core.wasm + vcsr_host.js
 vcsr build  <app> [--release]   bundle an app dir → <app>/dist (hashing, br/gz, manifest)
 vcsr serve  <dist> [--port N]   serve a dir over HTTP (sets Content-Type: application/wasm)
 vcsr update [--rebuild]         git pull + rebuild + reinstall this binary
@@ -46,14 +46,20 @@ vcsr gen examples/counter/src/counter
 
 ### `wasm` — component → browser-ABI `core.wasm` + a runnable bundle
 
-Compiles a V component (+ the vcsr runtime) to wasm via Path 2 (`v -cc clang` +
-wasi-sdk), using the runtime's host-owned-DOM backend (`-d wasm_browser`). Also
-emits a default `app.js` (host loader + WASI shim) and `index.html` next to it —
-unless you already ship your own (it won't clobber them).
+Regenerates every triplet's `*.gen.v` in `<src>`, then compiles the components
+(+ the vcsr runtime) to wasm via Path 2 (`v -cc clang` + wasi-sdk), using the
+runtime's host-owned-DOM backend (`-d wasm_browser`). Next to `core.wasm` it
+writes:
+
+- `vcsr_host.js` — the browser side of the DOM ABI + a WASI shim. **Owned by
+  vcsr**: rewritten on every build so it always matches the module's imports.
+- `app.js` + `index.html` — defaults, written only if absent (yours are never
+  clobbered). `app.js` just imports `boot()` from `./vcsr_host.js`; vcsr warns
+  if an existing `app.js` doesn't.
 
 ```sh
 WASI_SDK=/opt/wasi-sdk vcsr wasm examples/counter/src
-# ✓ examples/counter/wasm/core.wasm (…) [+ app.js + index.html]
+# ✓ examples/counter/wasm/core.wasm (…)
 vcsr serve examples/counter/wasm           # then open the printed URL
 ```
 

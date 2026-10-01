@@ -22,7 +22,7 @@ import http from 'node:http';
 import { readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from './launch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.VCSR_DIST || path.resolve(HERE, '../../testdata/fixture-app/dist');
@@ -80,16 +80,7 @@ const raw = (p, headers = {}) => new Promise((res, rej) =>
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✅', m); } else { fail++; console.log('  ❌', m); } };
 
-function chromePath() {
-  if (process.env.CHROME_BIN && existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
-  for (const p of ['/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'])
-    if (existsSync(p)) return p;
-  return null; // fall back to Playwright's bundled browser (needs `npx playwright install`)
-}
-const exe = chromePath();
-const browser = await chromium.launch(exe
-  ? { executablePath: exe, headless: true, args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] }
-  : { headless: true });
+const browser = await launchChrome();
 
 try {
   console.log('\n[1] GET / — wasm boot & mount');
