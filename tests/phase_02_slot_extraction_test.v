@@ -96,7 +96,9 @@ fn test_multiple_slots_keep_document_order_and_paths() {
 
 fn test_cond_slot_marks_anchor() {
 	ct := compile('<div><span @if="ok">hi</span></div>')
-	assert ct.html.contains('<!--vcsr:if-->')
+	assert ct.html == '<div><!----></div>'
+	assert ct.slots[0].path == []int{}
+	assert ct.slots[0].anchor == 0
 	assert ct.slots[0].kind == SlotKind.cond
 	assert ct.slots[0].cond_expr == 'ok'
 	// the conditional content is kept as a sub-template
@@ -142,13 +144,65 @@ fn test_fully_static_template_has_no_slots() {
 	assert ct.html == '<footer>© vcsr</footer>'
 }
 
-fn test_mixed_text_and_interpolation_errors_for_now() {
-	// documented phase-02 limitation: a sole interpolation per element is handled;
-	// mixed static text + interpolation is a later refinement.
-	parser_tree := parser.parse_template('<p>double: {{ x }}</p>') or { panic(err) }
-	slots.compile(parser_tree) or {
-		assert err.msg().contains('mixed')
-		return
-	}
-	assert false, 'expected a mixed-content error'
+fn test_text_mixed_with_interpolations_is_one_text_slot() {
+	ct := compile('<p>Hello {{ name }}, you have {{ n }} items!</p>')
+	assert ct.html == '<p></p>'
+	assert ct.slots.len == 1
+	s := ct.slots[0]
+	assert s.kind == SlotKind.text && s.path == []int{} && s.anchor == -1
+	assert s.parts.map(it.text) == ['Hello ', 'name', ', you have ', 'n', ' items!']
+	assert s.parts.map(it.is_expr) == [false, true, false, true, false]
+	assert s.text_exprs() == ['name', 'n']
+}
+
+fn test_interpolation_beside_elements_gets_an_anchored_text_node() {
+	ct := compile('<p>{{ a }} and <b>bold</b> then {{ b }}</p>')
+	assert ct.html == '<p><!----> and <b>bold</b> then <!----></p>'
+	assert ct.slots.len == 2
+	assert ct.slots[0].anchor == 0 && ct.slots[0].expr == 'a'
+	assert ct.slots[1].anchor == 1 && ct.slots[1].expr == 'b'
+}
+
+fn test_anchor_indices_count_every_anchor_in_the_container() {
+	ct := compile('<ul>{{ title }}<li @for="x in xs">{{ x }}</li><p @if="on">y</p></ul>')
+	assert ct.html == '<ul><!----><!----><!----></ul>'
+	assert ct.slots.map(it.anchor) == [0, 1, 2]
+	assert ct.slots.map(it.kind) == [SlotKind.text, .list, .cond]
+}
+
+fn test_pretty_printed_template_condenses_to_a_compact_skeleton() {
+	ct := compile('<main class="counter">\n  <h1>\n    {{ count }}\n  </h1>\n  <p class="muted">double <span>{{ doubled }}</span></p>\n  <button @click="inc">+1</button>\n</main>')
+	assert ct.html == '<main class="counter"><h1></h1><p class="muted">double <span></span></p><button>+1</button></main>'
+	assert ct.slots.map(it.path) == [[0], [1, 0], [2]]
+}
+
+fn test_inline_spaces_between_elements_survive() {
+	assert compile('<p><b>a</b> <i>b</i></p>').html == '<p><b>a</b> <i>b</i></p>'
+}
+
+fn test_user_comments_never_reach_the_skeleton() {
+	assert compile('<div><!-- note --><p>x</p></div>').html == '<div><p>x</p></div>'
+}
+
+fn test_attribute_values_are_quoted_safely() {
+	assert compile('<a title=\'say "hi"\'>x</a>').html == '<a title="say &quot;hi&quot;">x</a>'
+}
+
+fn test_void_and_self_closed_elements_serialize_correctly() {
+	// void: no closing tag; self-closed non-void: closed, so later paths don't shift
+	ct := compile('<div><input @bind="name"><span/><b>{{ x }}</b></div>')
+	assert ct.html == '<div><input><span></span><b></b></div>'
+	assert ct.slots[0].kind == SlotKind.bind && ct.slots[0].path == [0]
+	assert ct.slots[1].kind == SlotKind.text && ct.slots[1].path == [2]
+}
+
+fn test_whitespace_is_kept_inside_pre() {
+	assert compile('<div><pre>  a\n   b  </pre></div>').html == '<div><pre>  a\n   b  </pre></div>'
+}
+
+fn test_entities_in_text_slot_parts_are_decoded() {
+	// textContent doesn't decode entities, so literal parts arrive decoded
+	ct := compile('<p>&copy; {{ year }} &mdash; a &amp; b &lt; c &#x2713; &#65; &bogus; &</p>')
+	assert ct.slots[0].parts.map(it.text) == ['© ', 'year', ' — a & b < c ✓ A &bogus; &']
+	assert slots.decode_entities('no entities') == 'no entities'
 }

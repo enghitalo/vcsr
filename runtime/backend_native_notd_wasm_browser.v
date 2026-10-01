@@ -22,15 +22,16 @@ import vcsr.parser
 @[heap]
 struct Node {
 mut:
-	is_text  bool // text node: `text` is the content; tag/attrs/children unused
-	tag      string
-	text     string // text-node content
-	attrs    map[string]string
-	value    string // form value (two-way bind)
-	visible  bool = true // @if toggle
-	children []&Node          // ordered: text nodes + element nodes
-	on       map[string]fn () // event name → handler (closure form, native)
-	on_input fn (v string) = unsafe { nil } // two-way input writer (closure form, native)
+	is_text    bool // text node: `text` is the content; tag/attrs/children unused
+	is_comment bool // comment node: a slot anchor (`<!---->`) in a skeleton
+	tag        string
+	text       string // text-node content
+	attrs      map[string]string
+	value      string // form value (two-way bind)
+	visible    bool = true // @if toggle
+	children   []&Node          // ordered: text nodes + element nodes
+	on         map[string]fn () // event name → handler (closure form, native)
+	on_input   fn (v string) = unsafe { nil } // two-way input writer (closure form, native)
 	// closure-FREE handler slots (what codegen emits; wasm-safe — see signal.v):
 	on_ctx       map[string]EvtHandler // event name → (top-level fn + ctx)
 	on_input_ctx &InputHandler = unsafe { nil } // two-way writer (top-level fn + ctx)
@@ -50,9 +51,13 @@ struct InputHandler {
 	ctx voidptr
 }
 
-// set_text sets an element's textContent — replacing its children with one text
-// node, like the DOM setter.
+// set_text sets a node's textContent like the DOM setter: a text node takes the
+// string as its content; an element's children are replaced by one text node.
 fn (mut n Node) set_text(s string) {
+	if n.is_text {
+		n.text = s
+		return
+	}
 	n.children = [
 		&Node{
 			is_text: true
@@ -97,7 +102,7 @@ pub fn (t Template) instance() Instance {
 	root := build_tree(t.html)
 	mut slots := []&Node{cap: t.slots.len}
 	for d in t.slots {
-		slots << node_at(root, d.path)
+		slots << slot_node(root, d)
 	}
 	return Instance{
 		root:  root
@@ -362,9 +367,11 @@ pub fn (ins Instance) value_of(i int) string {
 // build_tree parses the static skeleton into an element tree, reusing vcsr's own
 // template parser so the element-child indexing matches the emitted paths.
 fn build_tree(html string) &Node {
-	tree := parser.parse_template(html) or { return &Node{
-		tag: 'div'
-	} }
+	tree := parser.parse_template(html) or {
+		return &Node{
+			tag: 'div'
+		}
+	}
 	return convert(tree.root)
 }
 
@@ -391,10 +398,43 @@ fn convert(n ast.Node) &Node {
 			.element, .component {
 				node.children << convert(ch)
 			}
+			.comment {
+				node.children << &Node{
+					is_comment: true
+				}
+			}
 			.interpolation {} // skeleton holes are emptied; none here
 		}
 	}
 	return node
+}
+
+// slot_node resolves a slot's node: the element at `path`, or — for an
+// anchored slot — that element's anchor-th comment child. An anchored TEXT slot
+// gets a fresh text node inserted before its anchor, which its binding patches.
+fn slot_node(root &Node, d SlotDesc) &Node {
+	mut n := node_at(root, d.path)
+	if d.anchor < 0 {
+		return n
+	}
+	mut k := 0
+	for i, ch in n.children {
+		if !ch.is_comment {
+			continue
+		}
+		if k == d.anchor {
+			if d.kind != .text {
+				return ch
+			}
+			t := &Node{
+				is_text: true
+			}
+			n.children.insert(i, t)
+			return t
+		}
+		k++
+	}
+	return n
 }
 
 // node_at walks `path` down element children (text nodes don't count, matching
@@ -407,12 +447,12 @@ fn node_at(root &Node, path []int) &Node {
 	return cur
 }
 
-// element_child returns the `idx`-th ELEMENT child of `n`, skipping text nodes.
-// A bad index degrades to `n` itself rather than panicking.
+// element_child returns the `idx`-th ELEMENT child of `n`, skipping text and
+// comment nodes. A bad index degrades to `n` itself rather than panicking.
 fn element_child(n &Node, idx int) &Node {
 	mut ei := 0
 	for ch in n.children {
-		if ch.is_text {
+		if ch.is_text || ch.is_comment {
 			continue
 		}
 		if ei == idx {
@@ -422,10 +462,6 @@ fn element_child(n &Node, idx int) &Node {
 	}
 	return n
 }
-
-// void_tags get no closing tag (HTML void elements).
-const void_tags = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
-	'param', 'source', 'track', 'wbr']
 
 // html serializes the live tree (an @if-hidden element renders as nothing).
 pub fn (v View) html() string {
@@ -439,6 +475,10 @@ fn write_html(mut sb strings.Builder, n &Node) {
 		sb.write_string(n.text)
 		return
 	}
+	if n.is_comment {
+		sb.write_string('<!---->')
+		return
+	}
 	if !n.visible {
 		return
 	}
@@ -447,7 +487,7 @@ fn write_html(mut sb strings.Builder, n &Node) {
 		sb.write_string(' ${k}="${val}"')
 	}
 	sb.write_string('>')
-	if n.tag in void_tags {
+	if parser.is_void(n.tag) {
 		return
 	}
 	for ch in n.children {

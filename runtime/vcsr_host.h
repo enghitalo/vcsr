@@ -11,6 +11,10 @@
 VCSR_IMPORT(host_register_template) int  host_register_template(const unsigned char* html, int len);
 VCSR_IMPORT(host_clone)             int  host_clone(int tpl);
 VCSR_IMPORT(host_slot_at)           int  host_slot_at(int root, const int* path, int n);
+// anchors: the k-th comment child of an element (an `<!---->` slot anchor), or a
+// fresh empty text node inserted just before it
+VCSR_IMPORT(host_anchor_at)         int  host_anchor_at(int node, int k);
+VCSR_IMPORT(host_anchor_text)       int  host_anchor_text(int node, int k);
 
 // per-node mutations (the reactive patches)
 VCSR_IMPORT(host_set_text)    void host_set_text(int node, const unsigned char* ptr, int len);

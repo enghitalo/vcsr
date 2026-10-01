@@ -27,9 +27,9 @@ update: ## fast-forward to origin, then rebuild + install
 	git pull --ff-only
 	$(MAKE) install
 
-test: build ## regenerate *.gen.v, then run the native test suite
-	./cmd/vcsr/vcsr gen examples/counter/src
-	$(V) -enable-globals test tests/ examples/counter/src/
+test: build ## regenerate *.gen.v, then run the native test suite (+ every example's)
+	@set -e; for ex in $(WASM_EXAMPLES); do ./cmd/vcsr/vcsr gen $$ex/src; done
+	$(V) -enable-globals test tests/ $(addsuffix /src/,$(WASM_EXAMPLES))
 
 browser-deps: $(SMOKE)/node_modules ## install Playwright (drives the installed Chrome)
 $(SMOKE)/node_modules: $(SMOKE)/package-lock.json

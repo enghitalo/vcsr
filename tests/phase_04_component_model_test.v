@@ -102,7 +102,7 @@ fn test_generated_code_imports_only_runtime() {
 fn test_generated_view_embeds_static_skeleton() {
 	src := counter().codegen()!.source
 	// the static HTML skeleton is embedded as a plain string constant
-	assert src.contains("'<main class=\"counter\"><h1></h1><button>+1</button></main>'")
+	assert src.contains('\'<main class="counter"><h1></h1><button>+1</button></main>\'')
 }
 
 fn test_style_is_scoped_in_generated_code() {
@@ -131,4 +131,48 @@ fn test_shared_component_is_hoisted_to_core() {
 fn test_single_route_component_stays_local() {
 	d := component.decide_hoist(name: 'ReportRow', used_by_routes: ['/reports'])
 	assert d == HoistDecision.route_local
+}
+
+// --- codegen for text parts, the shared lexer, and anchors -------------------
+
+const greet_v = '
+@[component]
+struct Greet {
+mut:
+	name vcsr.Signal[string] = signal("V")
+	n    vcsr.Signal[int] = signal(1)
+}
+fn (mut g Greet) label() string { return "x" }
+'
+
+fn greet_src(html string) string {
+	c := analyze(v: greet_v, html: html) or { panic(err) }
+	return c.codegen() or { panic(err) }.source
+}
+
+fn test_codegen_concatenates_text_parts() {
+	src := greet_src('<p>Hello {{ name }}, n={{ n }}!</p>')
+	assert src.contains("return 'Hello ' + runtime.to_str(g.name.get()) + ', n=' + runtime.to_str(g.n.get()) + '!'")
+}
+
+fn test_codegen_qualifies_inside_string_interpolation_and_skips_keywords() {
+	src := greet_src("<p>{{ 'hi \${name} \${label}' }} {{ int(n) < 10 }}</p>")
+	assert src.contains("runtime.to_str('hi \${g.name.get()} \${g.label()}')")
+	assert src.contains('runtime.to_str(int(g.n.get()) < 10)')
+}
+
+fn test_codegen_escapes_dollar_in_literal_text() {
+	src := greet_src('<p>Cost: $5 for {{ name }}</p>')
+	assert src.contains("'Cost: \\$5 for '")
+}
+
+fn test_codegen_emits_anchors_for_text_beside_elements() {
+	src := greet_src('<p>{{ name }} <b>!</b></p>')
+	assert src.contains("html:  '<p><!----> <b>!</b></p>'")
+	assert src.contains('runtime.SlotDesc{ kind: .text, path: []int{}, anchor: 0 }')
+}
+
+fn test_compiles_with_stock_v_ignores_interpolation_and_escaped_dollar() {
+	c := analyze(v: greet_v, html: "<p>Cost: $5 {{ 'x\${name}' }}</p>") or { panic(err) }
+	assert c.codegen()!.compiles_with_stock_v
 }

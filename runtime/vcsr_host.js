@@ -13,6 +13,15 @@
 const td = new TextDecoder();
 const te = new TextEncoder();
 
+// nthComment returns the k-th comment child of `el` — a slot anchor (`<!---->`).
+function nthComment(el, k) {
+  let seen = 0;
+  for (const n of el.childNodes) {
+    if (n.nodeType === Node.COMMENT_NODE && seen++ === k) return n;
+  }
+  throw new Error(`vcsr: anchor ${k} not found in <${el.localName}>`);
+}
+
 export async function boot(wasmUrl = './core.wasm') {
   let exp = null;
   const mem = () => exp.memory;
@@ -35,6 +44,14 @@ export async function boot(wasmUrl = './core.wasm') {
       let cur = H[root];
       for (let k = 0; k < n; k++) cur = cur.children[dv.getInt32(pathPtr + k * 4, true)];
       return ref(cur);
+    },
+    // anchors: the k-th comment child of a node, or a text node placed before it
+    host_anchor_at(h, k) { return ref(nthComment(H[h], k)); },
+    host_anchor_text(h, k) {
+      const a = nthComment(H[h], k);
+      const t = document.createTextNode('');
+      a.parentNode.insertBefore(t, a);
+      return ref(t);
     },
     // patches
     host_set_text(h, p, l) { H[h].textContent = rd(p, l); },

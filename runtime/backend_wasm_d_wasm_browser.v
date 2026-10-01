@@ -18,6 +18,8 @@ import vcsr
 fn C.host_register_template(html &u8, len int) int
 fn C.host_clone(tpl int) int
 fn C.host_slot_at(root int, path voidptr, n int) int
+fn C.host_anchor_at(node int, k int) int
+fn C.host_anchor_text(node int, k int) int
 fn C.host_set_text(node int, ptr &u8, len int)
 fn C.host_set_attr(node int, np &u8, nl int, vp &u8, vl int)
 fn C.host_set_value(node int, ptr &u8, len int)
@@ -59,7 +61,16 @@ pub fn (t Template) instance() Instance {
 	root := C.host_clone(tpl)
 	mut slots := []int{cap: t.slots.len}
 	for d in t.slots {
-		slots << C.host_slot_at(root, d.path.data, d.path.len)
+		mut h := C.host_slot_at(root, d.path.data, d.path.len)
+		if d.anchor >= 0 {
+			// an anchored text slot patches a fresh text node at its anchor
+			h = if d.kind == .text {
+				C.host_anchor_text(h, d.anchor)
+			} else {
+				C.host_anchor_at(h, d.anchor)
+			}
+		}
+		slots << h
 	}
 	return Instance{
 		root:  root

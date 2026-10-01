@@ -12,6 +12,7 @@ make examples                      # build all of them and check each in Chrome
 | Example | Demonstrates | Renders |
 |---|---|---|
 | [counter](counter) | one component: a signal, a computed value, a click handler | ✅ in Chrome ([screenshot](counter/screenshot.png)) |
+| [template-basics](template-basics) | the template language: mixed text, expressions in `{{ }}`, `@bind` on a void `<input>`, entities, whitespace | ✅ in Chrome ([screenshot](template-basics/screenshot.png)) |
 | [serve-with-vanilla](serve-with-vanilla) | serving a built `dist/` with the [vanilla](https://github.com/enghitalo/vanilla) HTTP server via its `static_assets` module | ✅ (serves `testdata/fixture-app`) |
 | [spa](spa) | the *target* authoring experience: router + code splitting, a shared component, a store, lists, async fetch | ❌ illustrative — uses features still on the [roadmap](../docs/ROADMAP.md) |
 
