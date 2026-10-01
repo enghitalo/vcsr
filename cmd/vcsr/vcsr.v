@@ -3,8 +3,8 @@
 // The pipeline (phases 01–11) lives in libraries; this binary wires them into
 // commands a developer runs:
 //
-//   vcsr gen    <triplet>         analyze a .v/.html/.css triplet → write <name>.gen.v
-//   vcsr wasm   <src> [--out DIR] compile a component src dir → core.wasm (v -cc clang)
+//   vcsr gen    <triplet|dir>     analyze .v/.html/.css triplet(s) → write <name>.gen.v
+//   vcsr wasm   <src> [--out DIR] gen + compile a component src dir → core.wasm (v -cc clang)
 //   vcsr build  <app> [--release] bundle an app dir → <app>/dist (hashing, br/gz, manifest)
 //   vcsr serve  <dist> [--port N] serve a built dist/ with the vanilla HTTP server
 //   vcsr update [--rebuild]       git pull + rebuild + reinstall this binary
@@ -27,9 +27,12 @@ import enghitalo.vanilla.static_assets
 
 const version = '0.0.1'
 
-// The default host loader + page `vcsr wasm` writes next to core.wasm. (Bound to
-// consts, not passed inline: V rejects `$embed_file(..)` as a call argument.)
-const wasm_loader_js = $embed_file('templates/wasm_loader.js')
+// What `vcsr wasm` writes next to core.wasm: the vcsr-owned host ABI (rewritten
+// every build) and a default app.js + page (written once, never overwritten).
+// (Bound to consts, not passed inline: V rejects `$embed_file(..)` as a call
+// argument.)
+const vcsr_host_js = $embed_file('../../runtime/vcsr_host.js')
+const wasm_app_js = $embed_file('templates/wasm_app.js')
 const wasm_index_html = $embed_file('templates/wasm_index.html')
 
 fn main() {
@@ -75,9 +78,40 @@ fn main() {
 fn do_gen(rest []string) ! {
 	pos, _ := parse_args(rest)
 	if pos.len == 0 {
-		return error('gen: missing <triplet> path (e.g. examples/counter/src/counter)')
+		return error('gen: missing <triplet> path or dir (e.g. examples/counter/src/counter)')
 	}
-	base := strip_known_ext(pos[0])
+	if os.is_dir(pos[0]) {
+		bases := triplets_in(pos[0])
+		if bases.len == 0 {
+			return error('gen: no .v + .html triplets in ${pos[0]}')
+		}
+		for base in bases {
+			gen_triplet(base)!
+		}
+		return
+	}
+	gen_triplet(strip_known_ext(pos[0]))!
+}
+
+// triplets_in lists every component triplet (`name.html` with a `name.v` beside
+// it) directly inside `dir`, as extension-less base paths.
+fn triplets_in(dir string) []string {
+	mut out := []string{}
+	mut names := os.ls(dir) or { return out }
+	names.sort()
+	for f in names {
+		if f.ends_with('.html') {
+			base := os.join_path(dir, f.all_before_last('.html'))
+			if os.is_file('${base}.v') {
+				out << base
+			}
+		}
+	}
+	return out
+}
+
+// gen_triplet analyzes one `base.{v,html,css}` triplet and writes `base.gen.v`.
+fn gen_triplet(base string) ! {
 	vsrc := os.read_file('${base}.v') or {
 		return error('gen: cannot read ${base}.v: ${err.msg()}')
 	}
@@ -107,6 +141,11 @@ fn do_wasm(rest []string) ! {
 	src := pos[0]
 	if !os.is_dir(src) {
 		return error('wasm: "${src}" is not a directory')
+	}
+	// regenerate every triplet's view()/style(), so the wasm never builds a stale
+	// *.gen.v
+	for base in triplets_in(src) {
+		gen_triplet(base)!
 	}
 	out := flags['out'] or { os.join_path(os.dir(src.trim_right('/')), 'wasm') }
 	os.mkdir_all(out)!
@@ -138,12 +177,17 @@ fn do_wasm(rest []string) ! {
 	os.rm(cfile) or {}
 	println('✓ ${wasmfile}  (${os.file_size(wasmfile)} B)')
 
-	// emit a runnable default loader + page, but never clobber a customized one
-	// (same "default unless the app ships its own" rule as bundle's loader_js).
+	// the host ABI is vcsr's: rewrite it every build so it always matches the
+	// imports this core.wasm was compiled against
+	os.write_file(os.join_path(out, 'vcsr_host.js'), vcsr_host_js.to_string())!
+	// the page entry + shell are the app's: write defaults once, never clobber
+	// (same "default unless the app ships its own" rule as bundle's loader_js)
 	app_js := os.join_path(out, 'app.js')
 	if !os.exists(app_js) {
-		os.write_file(app_js, wasm_loader_js.to_string())!
-		println('+ ${app_js}  (default host loader — edit freely; re-runs keep it)')
+		os.write_file(app_js, wasm_app_js.to_string())!
+		println('+ ${app_js}  (default entry — edit freely; re-runs keep it)')
+	} else if !(os.read_file(app_js) or { '' }).contains('vcsr_host.js') {
+		eprintln('warning: ${app_js} does not import ./vcsr_host.js — it carries its own copy of the host ABI, which may not match this core.wasm; delete it to get the default')
 	}
 	index_html := os.join_path(out, 'index.html')
 	if !os.exists(index_html) {
@@ -349,8 +393,8 @@ fn usage() {
 	println('vcsr ${version} — CSR→WASM compiler for V (phases 01–11 implemented)
 
 USAGE:
-  vcsr gen    <triplet>           generate <name>.gen.v from a .v/.html/.css triplet
-  vcsr wasm   <src> [--out DIR]   compile a component src dir → core.wasm (v -cc clang)
+  vcsr gen    <triplet|dir>       generate <name>.gen.v for a .v/.html/.css triplet (or each in a dir)
+  vcsr wasm   <src> [--out DIR]   gen + compile a component src dir → core.wasm + vcsr_host.js
   vcsr build  <app> [--release]   bundle an app dir → <app>/dist (hashing, br/gz, manifest)
   vcsr serve  <dist> [--port N]   serve a built dist/ with the vanilla HTTP server
   vcsr update [--rebuild]         git pull + rebuild + reinstall this binary
