@@ -1,5 +1,5 @@
 // Serve a built vcsr bundle with the vanilla HTTP server. vcsr's job ends at
-// emitting the `dist/` directory; vanilla's `http_server.static_assets` serves it.
+// emitting the `dist/` directory; vanilla's `static_assets` serves it.
 //
 // The `vcsr build` CLI is the remaining roadmap, so this resolves a bundle to
 // serve in this order — and, since a `dist/` is generated output (not committed),
@@ -9,8 +9,10 @@
 //   3. ../../testdata/fixture-app/dist  (built from its committed build/ wasm if absent)
 module main
 
-import vanilla.http_server
-import vanilla.http_server.static_assets
+import vanilla.core
+import vanilla.http1_1.response
+import vanilla.server
+import vanilla.static_assets
 import vcsr.bundle
 import os
 
@@ -45,23 +47,27 @@ const assets = static_assets.new(static_assets.Config{
 // negotiates Accept-Encoding, sets application/wasm + immutable Cache-Control,
 // and falls back to index.html for client routes. respond_into uses zero-copy
 // sendfile(2) for large bodies (and copies on TLS/non-Linux backends).
-fn handle(req_buffer []u8, _ int, mut out []u8) ! {
-	assets.respond_into(req_buffer, mut out)!
+fn handle(req_buffer []u8, mut out []u8, _client_fd int, _worker_state voidptr, mut _event_loop core.EventLoop) core.Step {
+	assets.respond_into(req_buffer, mut out) or {
+		out << response.tiny_bad_request_response
+		return .close
+	}
+	return .done
 }
 
 fn main() {
-	mut backend := unsafe { http_server.IOBackend(0) }
+	mut backend := unsafe { server.IOBackend(0) }
 	$if linux {
-		backend = http_server.IOBackend.epoll
+		backend = server.IOBackend.epoll
 	}
 	$if darwin {
-		backend = http_server.IOBackend.kqueue
+		backend = server.IOBackend.kqueue
 	}
-	mut server := http_server.new_server(http_server.ServerConfig{
+	mut srv := server.new_server(server.ServerConfig{
 		port:            3000
 		io_multiplexing: backend
-		request_handler: handle
+		handler:         handle
 	})!
 	println('serving vcsr bundle on http://localhost:3000  (root: ${dist_dir})')
-	server.run()
+	srv.run()
 }

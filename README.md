@@ -7,7 +7,7 @@
 > the router + code-split plan ([`router/`](router)), the wasm link plan + ABI
 > inspector ([`wasm/`](wasm)), the manifest reader ([`manifest/`](manifest)), and
 > the bundle/e2e build ([`bundle/`](bundle)) serving through vanilla's
-> `http_server.static_assets`.
+> `static_assets`.
 >
 > One honest caveat: V cannot yet compile a browser-ready wasm module (native
 > `-b wasm -os browser` panics; `v -cc clang` emits WASI imports — see
@@ -66,13 +66,13 @@ precompressed** files (`index.html`, `app.js`, `*.wasm`, `app.css`). There is no
 per-request server rendering — the server's job is to ship immutable bytes as
 fast as the kernel allows (ETag, `sendfile`, brotli), which is exactly what
 vanilla is built for. `vcsr` emits that `dist/`; vanilla's
-`http_server.static_assets` serves it with the correct `Content-Type`,
+`static_assets` module serves it with the correct `Content-Type`,
 `Content-Encoding`, `Cache-Control`, and SPA-fallback behavior — derived from the
 filenames, so vanilla never has to render anything per request.
 
 > Serving a CSR/WASM bundle needs a few things a bare file server doesn't
 > (notably `application/wasm`, precompressed-asset negotiation, immutable caching,
-> and SPA fallback). vanilla now ships exactly that as `http_server.static_assets`
+> and SPA fallback). vanilla now ships exactly that as `static_assets`
 > ([issue #19](https://github.com/enghitalo/vanilla/issues/19), implemented in
 > [50df944](https://github.com/enghitalo/vanilla/commit/50df94495be7bad95dc5cbc6e6be7fe53dd7fcb7)),
 > so vcsr just emits a `dist/` it serves — see
@@ -113,7 +113,7 @@ shared-memory code-splitting that keeps first load small.
  └──────────────────────────────────────────────────────────────┘
         │
         ▼
-  dist/  ──────────────▶  served by vanilla's http_server.static_assets
+  dist/  ──────────────▶  served by vanilla's static_assets
 ```
 
 Steps 1–5 are pure vcsr (parsers + codegen → plain V). Step 7 shells out to an
@@ -182,14 +182,15 @@ runtime), see [testdata/dashboard-app](testdata/dashboard-app) +
 
 ## Serving it with vanilla
 
-`vcsr build` emits a `dist/` bundle; vanilla's `http_server.static_assets` serves
-it. The whole handler is two lines — `static_assets.new` reads the bundle once at
+`vcsr build` emits a `dist/` bundle; vanilla's `static_assets` module serves
+it. The handler is one `respond_into` call — `static_assets.new` reads the bundle once at
 boot, precomputes a response for every asset, and shares it lock-free across
 workers:
 
 ```v
-import vanilla.http_server
-import vanilla.http_server.static_assets
+import vanilla.core
+import vanilla.http1_1.response
+import vanilla.static_assets
 
 // Built once at boot from the dist/ vcsr emitted; immutable afterwards.
 const assets = static_assets.new(static_assets.Config{
@@ -198,14 +199,21 @@ const assets = static_assets.new(static_assets.Config{
 	//           precompressed = [.br, .gz], sendfile_min_bytes = 256 KiB
 }) or { panic(err) }
 
-fn handle(req []u8, _ int, mut out []u8) ! {
+fn handle(req []u8, mut out []u8, _client_fd int, _worker_state voidptr, mut _event_loop core.EventLoop) core.Step {
 	// resolves path → asset, negotiates Accept-Encoding, sets application/wasm +
 	// immutable Cache-Control, falls back to index.html for client routes.
 	// respond_into uses zero-copy sendfile(2) for large bodies (respond() is the
 	// pure-bytes API).
-	assets.respond_into(req, mut out)!
+	assets.respond_into(req, mut out) or {
+		out << response.tiny_bad_request_response
+		return .close
+	}
+	return .done
 }
 ```
+
+Pass `handle` as `server.ServerConfig.handler` (`import vanilla.server`) — see
+[examples/serve-with-vanilla](examples/serve-with-vanilla/main.v).
 
 What `static_assets` guarantees (and what vcsr's `dist/` is built to satisfy):
 
@@ -251,13 +259,19 @@ All modules (`ast`, `parser`, `slots`, `bind`, `component`, `css`, `router`,
 `wasm`, `manifest`, `bundle`) are plain V under the `vcsr` module name. To
 resolve `import vcsr.*`, put the repo on V's module path (clone it as `vcsr/`,
 or symlink it). Phase 10 also serves through vanilla, so the `vanilla` module
-must be on the path too (`v install` it, or symlink it as `vanilla`):
+must be on the path too (`v install enghitalo.vanilla`, or symlink a checkout as
+`vanilla`):
 
 ```sh
 ln -s "$PWD" ~/.vmodules/vcsr                          # make `import vcsr.*` resolve
-ln -s /path/to/vanilla ~/.vmodules/vanilla             # for phase 10 (vanilla.http_server.static_assets)
+v install enghitalo.vanilla                            # for phase 10 (vanilla.static_assets)
 v -enable-globals test tests/                          # all 12 phases — pass
 ```
+
+`tests/`, `cmd/vcsr/` and `examples/serve-with-vanilla/` each carry their own
+`v.mod`. That is load-bearing: V resolves imports against the project root of the
+program being built, so with the vcsr root as project root, the stdlib
+`import runtime` inside `vanilla.core` would bind to vcsr's own `runtime/` module.
 
 `-enable-globals` is needed because the runtime's reactive core (phase 12) keeps
 its effect stack in a global — natural for the single-threaded wasm guest it

@@ -2,7 +2,7 @@
 //
 // GOAL: the final-mile optimizations (prefetch hints, dead-route elimination,
 // streaming-friendly loader) and a full end-to-end build of a fixture app whose
-// dist/ is then served by vanilla's http_server.static_assets — proving the two
+// dist/ is then served by vanilla's static_assets — proving the two
 // halves (vcsr emit + vanilla serve) connect over the REAL upstream module, not a
 // vcsr reimplementation. (static_assets landed as vanilla issue #19; see
 // ../docs/VANILLA-STATIC-ASSETS.md. This phase therefore needs vanilla on the V
@@ -10,7 +10,7 @@
 module main
 
 import vcsr.bundle { Bundle }
-import vanilla.http_server.static_assets
+import vanilla.static_assets
 
 const dist = 'testdata/fixture-app/dist'
 

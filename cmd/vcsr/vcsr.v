@@ -20,10 +20,17 @@ module main
 import os
 import vcsr.bundle
 import vcsr.component
-import vanilla.http_server
-import vanilla.http_server.static_assets
+import vanilla.core
+import vanilla.http1_1.response
+import vanilla.server
+import vanilla.static_assets
 
 const version = '0.0.1'
+
+// The default host loader + page `vcsr wasm` writes next to core.wasm. (Bound to
+// consts, not passed inline: V rejects `$embed_file(..)` as a call argument.)
+const wasm_loader_js = $embed_file('templates/wasm_loader.js')
+const wasm_index_html = $embed_file('templates/wasm_index.html')
 
 fn main() {
 	args := os.args#[1..]
@@ -130,12 +137,12 @@ fn do_wasm(rest []string) ! {
 	// (same "default unless the app ships its own" rule as bundle's loader_js).
 	app_js := os.join_path(out, 'app.js')
 	if !os.exists(app_js) {
-		os.write_file(app_js, $embed_file('templates/wasm_loader.js').to_string())!
+		os.write_file(app_js, wasm_loader_js.to_string())!
 		println('+ ${app_js}  (default host loader — edit freely; re-runs keep it)')
 	}
 	index_html := os.join_path(out, 'index.html')
 	if !os.exists(index_html) {
-		os.write_file(index_html, $embed_file('templates/wasm_index.html').to_string())!
+		os.write_file(index_html, wasm_index_html.to_string())!
 		println('+ ${index_html}')
 	}
 	println('  run it:  vcsr serve ${out}  (sets Content-Type: application/wasm)')
@@ -257,23 +264,27 @@ fn do_serve(rest []string) ! {
 	dist := pos[0]
 	port := parse_port(flags['port'] or { '3000' })!
 	assets := static_assets.new(static_assets.Config{ root: dist })!
-	mut backend := http_server.IOBackend.epoll
+	mut backend := server.IOBackend.epoll
 	$if darwin {
-		backend = http_server.IOBackend.kqueue
+		backend = server.IOBackend.kqueue
 	}
 	// `assets` is built once and is read-only thereafter (static_assets.AssetServer
 	// only reads its maps in respond_into), so capturing it in the handler and
 	// sharing it across the server's workers needs no lock — same as the const+
 	// top-level-fn form in examples/serve-with-vanilla.
-	mut server := http_server.new_server(
+	mut srv := server.new_server(
 		port:            port
 		io_multiplexing: backend
-		request_handler: fn [assets] (req []u8, _ int, mut out []u8) ! {
-			assets.respond_into(req, mut out)!
+		handler:         fn [assets] (req []u8, mut out []u8, _client_fd int, _worker_state voidptr, mut _event_loop core.EventLoop) core.Step {
+			assets.respond_into(req, mut out) or {
+				out << response.tiny_bad_request_response
+				return .close
+			}
+			return .done
 		}
 	)!
 	println('vcsr: serving ${dist} on http://localhost:${port}  (Ctrl-C to stop)')
-	server.run()
+	srv.run()
 }
 
 // --- helpers ----------------------------------------------------------------
