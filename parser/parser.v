@@ -5,10 +5,17 @@
 // HTML rules it follows: void elements (`<input>`, `<br>`, …) take no closing
 // tag; `<x/>` closes any element; text runs to the next tag, so a `<` that
 // doesn't start markup (`1 < 2`) and anything inside `{{ … }}` is text;
-// `<script>`/`<style>` bodies are raw text. Whitespace is condensed the way
-// Vue's compiler does it (see condense), except inside <pre>/<textarea>, so a
-// pretty-printed template compiles to the same skeleton as a one-line one.
-// Errors carry `line L, col C`.
+// `<script>`/`<style>` bodies are raw text; newlines are normalized to LF, and
+// one right after `<pre>`/`<textarea>`/`<listing>` is dropped. These rules are
+// HTML's, so they apply to elements only: a PascalCase tag is a component
+// whatever its name (`<Link>` is not a void `<link>`). Whitespace is condensed
+// the way Vue's compiler does it (see condense), except inside
+// <pre>/<textarea>, so a pretty-printed template compiles to the same skeleton
+// as a one-line one. Errors carry `line L, col C`.
+//
+// parse_html parses a compiled SKELETON the way the browser does, for the
+// native mock DOM: no `{{ }}`, no directives, no whitespace condensing, and
+// character references decoded.
 module parser
 
 import vcsr.ast
@@ -20,16 +27,21 @@ pub const void_elements = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'i
 // raw_text_elements hold literal text: no tags, no interpolation, no condensing.
 const raw_text_elements = ['script', 'style']
 
-// preserve_ws_elements keep their whitespace verbatim.
-const preserve_ws_elements = ['pre', 'textarea']
+// rcdata_elements hold text with character references but no tags (HTML mode;
+// a template parses tags in them).
+const rcdata_elements = ['textarea', 'title']
 
-// is_void reports whether `tag` is an HTML void element.
+// preserve_ws_elements keep their whitespace verbatim.
+const preserve_ws_elements = ['pre', 'textarea', 'listing']
+
+// is_void reports whether `tag` is an HTML void element (never a component).
 pub fn is_void(tag string) bool {
-	return tag.to_lower() in void_elements
+	return !is_component_name(tag) && tag.to_lower() in void_elements
 }
 
 struct Parser {
-	src string
+	src  string
+	html bool // HTML mode (parse_html): a skeleton, read the way a browser reads it
 mut:
 	pos      int
 	preserve int // depth of <pre>/<textarea> ancestors: whitespace is kept inside them
@@ -40,8 +52,22 @@ mut:
 // `@click="m"`, …) are kept verbatim; later phases resolve them against the
 // component struct.
 pub fn parse_template(tmpl string) !ast.Tree {
+	return parse(tmpl, false)
+}
+
+// parse_html parses static HTML, a template's compiled skeleton, the way a
+// browser's HTML parser does: `{{` is text, every attribute is static, the
+// whitespace is kept as written, and character references in text and
+// attribute values are decoded. The native mock DOM is built from it.
+pub fn parse_html(src string) !ast.Tree {
+	return parse(src, true)
+}
+
+fn parse(src string, html bool) !ast.Tree {
 	mut p := Parser{
-		src: tmpl
+		// the HTML input stream turns CRLF and a lone CR into LF
+		src:  src.replace('\r\n', '\n').replace('\r', '\n')
+		html: html
 	}
 	p.skip_ws_and_comments()
 	if p.pos >= p.src.len {
@@ -109,7 +135,12 @@ fn (mut p Parser) parse_element() !ast.Node {
 		}
 
 		// classify the attribute
-		if aname.starts_with('@') {
+		if p.html {
+			node.attrs << ast.Attr{
+				name:  aname
+				value: decode_attr_entities(aval)
+			}
+		} else if aname.starts_with('@') {
 			rest := aname[1..]
 			if rest in ['bind', 'if', 'for'] || rest.len == 0 || rest.starts_with('.') {
 				if aval.trim_space() == '' {
@@ -194,12 +225,17 @@ fn (mut p Parser) parse_element() !ast.Node {
 	if node.self_closing || is_void(tag) {
 		return node
 	}
-	lower := tag.to_lower()
-	if lower in raw_text_elements {
+	// HTML's content rules are for elements; a component's children are
+	// template content whatever the component is called
+	lower := if is_comp { '' } else { tag.to_lower() }
+	keep := lower in preserve_ws_elements
+	if keep && p.starts_with('\n') {
+		p.pos++ // HTML drops a newline right after <pre>/<textarea>/<listing>
+	}
+	if lower in raw_text_elements || (p.html && lower in rcdata_elements) {
 		p.parse_raw_text(mut node, open)!
 		return node
 	}
-	keep := lower in preserve_ws_elements
 	if keep {
 		p.preserve++
 	}
@@ -210,14 +246,27 @@ fn (mut p Parser) parse_element() !ast.Node {
 	return node
 }
 
-// split_for splits an @for value `item in source` on whitespace around `in`;
-// `item` must be a plain identifier.
+// split_for splits an @for value `item in source` around the first `in` with
+// whitespace on both sides; `item` must be a plain identifier, and the source
+// expression is kept as written.
 fn split_for(v string) ?(string, string) {
-	f := v.fields()
-	if f.len < 3 || f[1] != 'in' || !is_ident(f[0]) {
+	t := v.trim_space()
+	mut i := 0
+	for i < t.len && !is_ws(t[i]) {
+		i++
+	}
+	item := t[..i]
+	for i < t.len && is_ws(t[i]) {
+		i++
+	}
+	if !is_ident(item) || !t[i..].starts_with('in') || i + 2 >= t.len || !is_ws(t[i + 2]) {
 		return none
 	}
-	return f[0], f[2..].join(' ')
+	source := t[i + 2..].trim_space()
+	if source == '' {
+		return none
+	}
+	return item, source
 }
 
 fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
@@ -226,14 +275,14 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 			return error('unclosed tag <${parent.tag}> opened at ${p.at(open)}')
 		}
 		// text runs to the next tag: skip over {{ … }} (it may contain `<`) and
-		// any `<` that doesn't start markup (`a < b`)
+		// any `<` that doesn't start markup (`a < b`); HTML has no {{ }}
 		start := p.pos
 		for p.pos < p.src.len {
-			if p.starts_with('{{{{') || p.starts_with('}}}}') {
+			if !p.html && (p.starts_with('{{{{') || p.starts_with('}}}}')) {
 				p.pos += 4
 				continue
 			}
-			if p.starts_with('{{') {
+			if !p.html && p.starts_with('{{') {
 				close := p.find('}}', p.pos + 2)
 				if close < 0 {
 					return error('unterminated {{ at ${p.at(p.pos)} (missing }})')
@@ -247,20 +296,25 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 			p.pos++
 		}
 		if p.pos > start {
-			flush_text(mut parent, p.src[start..p.pos])
+			if p.html {
+				parent.children << ast.Node{
+					kind: .text
+					text: decode_entities(p.src[start..p.pos])
+				}
+			} else {
+				flush_text(mut parent, p.src[start..p.pos])
+			}
 		}
 		if p.pos >= p.src.len {
 			return error('unclosed tag <${parent.tag}> opened at ${p.at(open)}')
 		}
 		// at '<'
 		if p.starts_with('<!--') {
-			end := p.find('-->', p.pos)
-			text := if end < 0 { p.src[p.pos + 4..] } else { p.src[p.pos + 4..end] }
+			text := p.read_comment()
 			parent.children << ast.Node{
 				kind: .comment
 				text: text
 			}
-			p.pos = if end < 0 { p.src.len } else { end + 3 }
 			continue
 		}
 		if p.starts_with('</') {
@@ -275,7 +329,7 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 			if cname != parent.tag {
 				return error('mismatched closing tag </${cname}> at ${p.at(cpos)}, expected </${parent.tag}> (opened at ${p.at(open)})')
 			}
-			if p.preserve == 0 {
+			if p.preserve == 0 && !p.html {
 				parent.children = condense(parent.children)
 			}
 			return
@@ -285,7 +339,8 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 	}
 }
 
-// parse_raw_text reads a <script>/<style> body verbatim up to its closing tag.
+// parse_raw_text reads a <script>/<style> body verbatim up to its closing tag
+// (in HTML mode also a <textarea>/<title> body, whose references are decoded).
 fn (mut p Parser) parse_raw_text(mut node ast.Node, open int) ! {
 	close := '</' + node.tag
 	end := p.find(close, p.pos)
@@ -293,9 +348,10 @@ fn (mut p Parser) parse_raw_text(mut node ast.Node, open int) ! {
 		return error('unclosed tag <${node.tag}> opened at ${p.at(open)}')
 	}
 	if end > p.pos {
+		text := p.src[p.pos..end]
 		node.children << ast.Node{
 			kind: .text
-			text: p.src[p.pos..end]
+			text: if node.tag.to_lower() in rcdata_elements { decode_entities(text) } else { text }
 		}
 	}
 	p.pos = end + close.len
@@ -454,12 +510,31 @@ fn (mut p Parser) skip_ws_and_comments() {
 		if is_ws(p.src[p.pos]) {
 			p.pos++
 		} else if p.starts_with('<!--') {
-			end := p.find('-->', p.pos)
-			p.pos = if end < 0 { p.src.len } else { end + 3 }
+			p.read_comment()
 		} else {
 			break
 		}
 	}
+}
+
+// read_comment consumes the comment at pos (`<!--`) and returns its text. Like
+// HTML, `<!-->` and `<!--->` are empty comments, and one with no `-->` runs to
+// the end.
+fn (mut p Parser) read_comment() string {
+	body := p.pos + 4
+	for abrupt in ['>', '->'] {
+		if p.src[body..].starts_with(abrupt) {
+			p.pos = body + abrupt.len
+			return ''
+		}
+	}
+	end := p.find('-->', body)
+	if end < 0 {
+		p.pos = p.src.len
+		return p.src[body..]
+	}
+	p.pos = end + 3
+	return p.src[body..end]
 }
 
 fn (mut p Parser) read_name() string {
