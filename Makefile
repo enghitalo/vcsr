@@ -9,7 +9,24 @@ PREFIX ?= $(HOME)/.local
 BIN     := $(PREFIX)/bin/vcsr
 V       ?= v
 
-.PHONY: build install update test examples screenshots browser-deps clean help
+# V v3 retries a failed compile with its old 0.5.2 compiler ("retrying with
+# …/v1-fallback/0.5.2/v"), so a v3 failure could pass on 0.5.2 (#35). Turn the
+# retry off for every V a recipe runs, and fail `make test` if it shows up anyway.
+export V_MACOS_V3_NO_FALLBACK := 1
+SHELL       := bash
+.SHELLFLAGS := -o pipefail -c
+VTEST_LOG   := .vtest.log
+
+.PHONY: build install update test examples screenshots browser-deps clean help fmt fmt-verify
+
+# V files tracked for formatting in cycle 1
+FMT_FILES := bench/parse_bench.v examples/spa/src/components/todos.v js_ffi.v router/router.v tests/phase_06_router_codesplit_test.v tests/phase_13_runtime_ffi_test.v tests/phase_14_runtime_engine_test.v wasm/wasm.v
+
+fmt: ## format tracked V sources
+	$(V) fmt -w $(FMT_FILES)
+
+fmt-verify: ## verify tracked V sources are formatted
+	$(V) fmt -verify $(FMT_FILES)
 
 # examples that build to wasm: those with a browser entry in src/
 WASM_EXAMPLES := $(patsubst %/src/entry_d_wasm_browser.v,%,$(wildcard examples/*/src/entry_d_wasm_browser.v))
@@ -27,9 +44,11 @@ update: ## fast-forward to origin, then rebuild + install
 	git pull --ff-only
 	$(MAKE) install
 
-test: build ## regenerate *.gen.v, then run the native test suite (+ every example's)
+test: build ## regenerate *.gen.v, then run the native test suite + every example's (on V v3 only)
 	@set -e; for ex in $(WASM_EXAMPLES); do ./cmd/vcsr/vcsr gen $$ex/src; done
-	$(V) -enable-globals test tests/ $(addsuffix /src/,$(WASM_EXAMPLES))
+	@echo "$$($(V) version), fallback to 0.5.2 disabled (V_MACOS_V3_NO_FALLBACK=1)"
+	$(V) -enable-globals test tests/ $(addsuffix /src/,$(WASM_EXAMPLES)) 2>&1 | tee $(VTEST_LOG)
+	@! grep -n 'retrying with' $(VTEST_LOG) || { echo 'make test: V fell back to its 0.5.2 compiler (#35)'; exit 1; }
 
 browser-deps: $(SMOKE)/node_modules ## install Playwright (drives the installed Chrome)
 $(SMOKE)/node_modules: $(SMOKE)/package-lock.json
@@ -43,7 +62,7 @@ screenshots: build browser-deps ## same as examples, refreshing each examples/*/
 	@set -e; for ex in $(WASM_EXAMPLES); do ./cmd/vcsr/vcsr wasm $$ex/src; node $(SMOKE)/example.mjs $$ex; done
 
 clean: ## remove build artifacts
-	rm -f cmd/vcsr/vcsr cmd/vcsr/vcsr.new
+	rm -f cmd/vcsr/vcsr cmd/vcsr/vcsr.new $(VTEST_LOG)
 
 help: ## list targets
 	@grep -hE '^[a-z][a-z-]*:.*##' $(MAKEFILE_LIST) | sed -E 's/:.*## / - /' | sort

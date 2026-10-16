@@ -9,8 +9,7 @@
 module main
 
 import vcsr { signal }
-import vcsr.runtime { SlotDesc, Template, bind_attr, bind_event, bind_if, bind_list, bind_text,
-	bind_value, to_str }
+import vcsr.runtime { SlotDesc, Template, bind_attr, bind_event, bind_if, bind_list, bind_text, bind_value, to_str }
 
 // The counter, exactly as codegen would emit it: two text slots reading one
 // signal + a click handler that writes it. The full clone → bind → patch loop.
@@ -19,9 +18,19 @@ fn test_counter_text_and_event_loop() {
 	tpl := Template{
 		html:  '<main class="counter"><h1></h1><p class="muted">double <span></span></p><button>+1</button></main>'
 		slots: [
-			SlotDesc{ kind: .text, path: [0] }, // h1
-			SlotDesc{ kind: .text, path: [1, 0] }, // span inside p (nested path)
-			SlotDesc{ kind: .event, path: [2], name: 'click' }, // button
+			SlotDesc{
+				kind: .text
+				path: [0]
+			}, // h1
+			SlotDesc{
+				kind: .text
+				path: [1, 0]
+			}, // span inside p (nested path)
+			SlotDesc{
+				kind: .event
+				path: [2]
+				name: 'click'
+			}, // button
 		]
 	}
 	mut ins := tpl.instance()

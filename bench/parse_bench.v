@@ -23,8 +23,7 @@ fn C.GC_get_total_bytes() usize
 
 // A realistic component: a handful of elements, events, a bind, an attr, a list
 // and a conditional. ~200 bytes, like a real `.html` file.
-const realistic =
-	'<form class="f" @submit.prevent="save"><input @bind="draft" /><a :href="url">go</a>' +
+const realistic = '<form class="f" @submit.prevent="save"><input @bind="draft" /><a :href="url">go</a>' +
 	'<ul><li @for="x in xs" :key="x.id"><span>{{ x.name }}</span></li></ul>' +
 	'<p @if="ok"><b>{{ msg }}</b></p></form>'
 
@@ -62,8 +61,7 @@ fn stages(label string, t string, passes int) {
 	}
 	pp := f64(passes)
 	println('${label} (${t.len} B, ${passes} passes):')
-	println('  parse ${f64(p_ns) / pp / 1000.0:7.2} us   slots ${f64(s_ns) / pp / 1000.0:7.2} us   bind ${f64(b_ns) / pp / 1000.0:7.2} us   total ${f64(
-		p_ns + s_ns + b_ns) / pp / 1000.0:7.2} us   (sink ${acc})')
+	println('  parse ${f64(p_ns) / pp / 1000.0:7.2} us   slots ${f64(s_ns) / pp / 1000.0:7.2} us   bind ${f64(b_ns) / pp / 1000.0:7.2} us   total ${f64(p_ns + s_ns + b_ns) / pp / 1000.0:7.2} us   (sink ${acc})')
 }
 
 fn main() {

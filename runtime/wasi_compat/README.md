@@ -10,6 +10,7 @@ fixed set of POSIX headers on every non-Windows target, and wasi-libc
 | `netdb.h`     | missing                 | empty unless a real one exists (`#include_next`) |
 | `termios.h`   | missing                 | same                                           |
 | `sys/wait.h`  | missing                 | same                                           |
+| `sys/ptrace.h`| missing                 | same                                           |
 | `setjmp.h`    | `#error` without wasm EH | empty unless `__wasm_exception_handling__`     |
 
 `sys/mman.h`, `signal.h` and `sys/resource.h` are handled by wasi-libc's own

@@ -62,8 +62,8 @@ pub:
 // non-function exports). The index is only used transiently by the inspector to
 // resolve the externref flag once the whole index space is known.
 struct Sym {
-	name          string
-	func_index    int = -1
+	name           string
+	func_index     int = -1
 	uses_externref bool
 }
 
@@ -87,9 +87,9 @@ pub fn (s &Symbols) contains(name string) bool {
 // occupies a slot in the function index space), and whether its signature
 // touches externref.
 struct Imp {
-	ns            string
-	name          string
-	is_func       bool
+	ns             string
+	name           string
+	is_func        bool
 	uses_externref bool
 }
 
@@ -116,13 +116,13 @@ pub fn (s &ImportSet) contains(ns string, name string) bool {
 // the phase-07 and phase-11 invariants read identically.
 pub struct Module {
 pub:
-	kind                    ModuleKind
-	exports                 Symbols
-	imports                 ImportSet
-	pic                     bool // position-independent (relative to __memory_base/__table_base)
+	kind                      ModuleKind
+	exports                   Symbols
+	imports                   ImportSet
+	pic                       bool // position-independent (relative to __memory_base/__table_base)
 	closures_use_shared_table bool // a closure made here lands in the shared table
-	dom                     DomAbi
-	reloc                   Reloc
+	dom                       DomAbi
+	reloc                     Reloc
 }
 
 // defines reports whether the module provides `name` itself (exports it without
@@ -175,29 +175,50 @@ pub fn (lp &LinkPlan) chunk(name string) Module {
 // a disjoint slice of the shared memory and table.
 pub fn link(plan router.Plan) !LinkPlan {
 	core := Module{
-		kind: .main
-		exports: Symbols{
+		kind:                      .main
+		exports:                   Symbols{
 			syms: [
 				// the shared world this MAIN module owns and hands to side modules
-				Sym{ name: 'memory' },
-				Sym{ name: '__indirect_function_table' },
-				Sym{ name: '__v_alloc' },
-				Sym{ name: '__v_free' },
+				Sym{
+					name: 'memory'
+				},
+				Sym{
+					name: '__indirect_function_table'
+				},
+				Sym{
+					name: '__v_alloc'
+				},
+				Sym{
+					name: '__v_free'
+				},
 				// the landing route lives in core; mount takes the host root as externref
-				Sym{ name: 'mount', uses_externref: true },
-				Sym{ name: 'unmount' },
+				Sym{
+					name:           'mount'
+					uses_externref: true
+				},
+				Sym{
+					name: 'unmount'
+				},
 			]
 		}
-		imports: ImportSet{
+		imports:                   ImportSet{
 			imps: [
 				// host DOM ops: values cross as externref
-				Imp{ ns: 'env', name: 'register_template', uses_externref: true },
-				Imp{ ns: 'env', name: 'clone_template', uses_externref: true },
+				Imp{
+					ns:             'env'
+					name:           'register_template'
+					uses_externref: true
+				},
+				Imp{
+					ns:             'env'
+					name:           'clone_template'
+					uses_externref: true
+				},
 			]
 		}
-		pic: false // the MAIN module owns absolute memory/table; only chunks relocate
+		pic:                       false // the MAIN module owns absolute memory/table; only chunks relocate
 		closures_use_shared_table: true
-		dom: .externref
+		dom:                       .externref
 	}
 
 	// each lazy route → one SIDE chunk, assigned a disjoint relocation window.
@@ -208,9 +229,11 @@ pub fn link(plan router.Plan) !LinkPlan {
 	}
 
 	return LinkPlan{
-		core: core
-		boundary_abi: BoundaryAbi{ dom: .externref }
-		chunks: chunks
+		core:         core
+		boundary_abi: BoundaryAbi{
+			dom: .externref
+		}
+		chunks:       chunks
 	}
 }
 
@@ -228,33 +251,63 @@ fn side_chunk(idx int) Module {
 	mem_start := idx * chunk_mem_window
 	tbl_start := idx * chunk_table_window
 	return Module{
-		kind: .side
-		imports: ImportSet{
+		kind:                      .side
+		imports:                   ImportSet{
 			imps: [
 				// the shared world, IMPORTED from core (SIDE_MODULE contract)
-				Imp{ ns: 'core', name: 'memory' },
-				Imp{ ns: 'core', name: '__indirect_function_table' },
-				Imp{ ns: 'core', name: '__memory_base' }, // relocation base for data
-				Imp{ ns: 'core', name: '__table_base' },  // relocation base for funcs
+				Imp{
+					ns:   'core'
+					name: 'memory'
+				},
+				Imp{
+					ns:   'core'
+					name: '__indirect_function_table'
+				},
+				Imp{
+					ns:   'core'
+					name: '__memory_base'
+				}, // relocation base for data
+				Imp{
+					ns:   'core'
+					name: '__table_base'
+				}, // relocation base for funcs
 				// the allocator is IMPORTED, never duplicated into the chunk
-				Imp{ ns: 'core', name: '__v_alloc' },
+				Imp{
+					ns:   'core'
+					name: '__v_alloc'
+				},
 				// host DOM op: the node crosses as externref
-				Imp{ ns: 'env', name: 'set_text', uses_externref: true },
+				Imp{
+					ns:             'env'
+					name:           'set_text'
+					uses_externref: true
+				},
 			]
 		}
-		exports: Symbols{
+		exports:                   Symbols{
 			syms: [
 				// uniform route interface, identical to core's
-				Sym{ name: 'mount', uses_externref: true },
-				Sym{ name: 'unmount' },
+				Sym{
+					name:           'mount'
+					uses_externref: true
+				},
+				Sym{
+					name: 'unmount'
+				},
 			]
 		}
-		pic: true // data/funcs placed relative to __memory_base/__table_base
+		pic:                       true // data/funcs placed relative to __memory_base/__table_base
 		closures_use_shared_table: true
-		dom: .externref
-		reloc: Reloc{
-			mem_range:   Range{ start: mem_start, end: mem_start + chunk_mem_window }
-			table_range: Range{ start: tbl_start, end: tbl_start + chunk_table_window }
+		dom:                       .externref
+		reloc:                     Reloc{
+			mem_range:   Range{
+				start: mem_start
+				end:   mem_start + chunk_mem_window
+			}
+			table_range: Range{
+				start: tbl_start
+				end:   tbl_start + chunk_table_window
+			}
 		}
 	}
 }
@@ -311,7 +364,9 @@ struct FuncType {
 // DOM ABI as `.externref` whenever an imported/exported function signature uses
 // externref. `pic` is true for a SIDE module that imports `__memory_base`.
 pub fn inspect(bytes []u8) !Module {
-	mut r := Reader{ b: bytes }
+	mut r := Reader{
+		b: bytes
+	}
 	r.expect_header()!
 
 	mut types := []FuncType{}
@@ -375,20 +430,26 @@ pub fn inspect(bytes []u8) !Module {
 	dom := if uses_externref { DomAbi.externref } else { DomAbi.handle_table }
 
 	return Module{
-		kind: kind
-		exports: Symbols{ syms: exports }
-		imports: ImportSet{ imps: imports }
+		kind:                      kind
+		exports:                   Symbols{
+			syms: exports
+		}
+		imports:                   ImportSet{
+			imps: imports
+		}
 		// a SIDE module that imports __memory_base places its data relative to it.
-		pic: kind == .side && imports_memory_base
+		pic:                       kind == .side && imports_memory_base
 		closures_use_shared_table: true
-		dom: dom
+		dom:                       dom
 	}
 }
 
 // parse_type_section reads the function-type vector, recording for each whether
 // any param or result is externref (so we can flag the DOM boundary).
 fn parse_type_section(body []u8) ![]FuncType {
-	mut r := Reader{ b: body }
+	mut r := Reader{
+		b: body
+	}
 	count := r.uleb()!
 	mut out := []FuncType{cap: count}
 	for _ in 0 .. count {
@@ -409,7 +470,9 @@ fn parse_type_section(body []u8) ![]FuncType {
 				ext = true
 			}
 		}
-		out << FuncType{ uses_externref: ext }
+		out << FuncType{
+			uses_externref: ext
+		}
 	}
 	return out
 }
@@ -419,7 +482,9 @@ fn parse_type_section(body []u8) ![]FuncType {
 // the externref flag of each IMPORTED FUNCTION in order — imported functions
 // hold the low slots of the function index space, ahead of defined functions.
 fn parse_import_section(body []u8, types []FuncType) !([]Imp, bool, bool, []bool) {
-	mut r := Reader{ b: body }
+	mut r := Reader{
+		b: body
+	}
 	count := r.uleb()!
 	mut out := []Imp{cap: count}
 	mut imported_func_ext := []bool{}
@@ -458,10 +523,16 @@ fn parse_import_section(body []u8, types []FuncType) !([]Imp, bool, bool, []bool
 				return error('unknown import descriptor kind 0x${kind.hex()}')
 			}
 		}
+
 		if name == '__memory_base' {
 			has_memory_base = true
 		}
-		out << Imp{ ns: ns, name: name, is_func: is_func, uses_externref: ext }
+		out << Imp{
+			ns:             ns
+			name:           name
+			is_func:        is_func
+			uses_externref: ext
+		}
 	}
 	return out, has_mem, has_memory_base, imported_func_ext
 }
@@ -469,7 +540,9 @@ fn parse_import_section(body []u8, types []FuncType) !([]Imp, bool, bool, []bool
 // parse_function_section reads the FUNCTION section: the type index of each
 // locally-defined function, in definition order.
 fn parse_function_section(body []u8) ![]int {
-	mut r := Reader{ b: body }
+	mut r := Reader{
+		b: body
+	}
 	count := r.uleb()!
 	mut out := []int{cap: count}
 	for _ in 0 .. count {
@@ -482,7 +555,9 @@ fn parse_function_section(body []u8) ![]int {
 // descriptor kind and index, and whether any memory is exported. The externref
 // flag is filled in later, once the whole function index space is known.
 fn parse_export_section(body []u8) !([]Sym, bool) {
-	mut r := Reader{ b: body }
+	mut r := Reader{
+		b: body
+	}
 	count := r.uleb()!
 	mut out := []Sym{cap: count}
 	mut has_mem := false
@@ -531,7 +606,11 @@ fn resolve_export_externref(exports []Sym, imported_func_ext []bool, func_type_i
 				}
 			}
 		}
-		out << Sym{ name: e.name, func_index: e.func_index, uses_externref: ext }
+		out << Sym{
+			name:           e.name
+			func_index:     e.func_index
+			uses_externref: ext
+		}
 	}
 	return out
 }
@@ -561,8 +640,8 @@ pub fn verify_abi(bytes []u8, kind ModuleKind) !Conformance {
 			if m.kind != .main {
 				violations << 'expected a MAIN module that exports its own memory, but this module imports memory from another module'
 			}
-			for need in ['memory', '__indirect_function_table', '__v_alloc', '__v_free',
-				'mount', 'unmount'] {
+			for need in ['memory', '__indirect_function_table', '__v_alloc', '__v_free', 'mount',
+				'unmount'] {
 				if !m.exports.contains(need) {
 					violations << 'MAIN module must export "${need}"'
 				}
@@ -573,8 +652,8 @@ pub fn verify_abi(bytes []u8, kind ModuleKind) !Conformance {
 			if m.kind != .side {
 				violations << 'expected a SIDE module that imports memory from core, but this module exports its own memory'
 			}
-			for need in ['memory', '__indirect_function_table', '__memory_base',
-				'__table_base', '__v_alloc'] {
+			for need in ['memory', '__indirect_function_table', '__memory_base', '__table_base',
+				'__v_alloc'] {
 				if !m.imports.contains('core', need) {
 					violations << 'SIDE module must import core.${need}'
 				}

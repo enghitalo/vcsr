@@ -576,7 +576,7 @@ fn brotli_compress(path string) ! {
 		os.write_file(script,
 			"import {brotliCompressSync} from 'node:zlib';\nimport {readFileSync, writeFileSync} from 'node:fs';\nconst p = process.argv[2];\nwriteFileSync(p + '.br', brotliCompressSync(readFileSync(p)));\n")!
 	}
-	res := os.execute('node "${script}" "${path}"')
+	res := os.exec(['node', script, path])
 	if res.exit_code != 0 {
 		return error('brotli (node) failed: ${res.output}')
 	}

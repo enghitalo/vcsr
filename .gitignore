@@ -29,3 +29,6 @@ examples/*/wasm/core.c
 
 # built vcsr CLI binary
 cmd/vcsr/vcsr
+
+# `make test` output, scanned for V's 0.5.2 fallback
+.vtest.log

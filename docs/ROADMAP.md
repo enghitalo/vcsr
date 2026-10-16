@@ -56,7 +56,7 @@ ships an example under `examples/` whose README shows a screenshot taken by
 
 ## Milestone 4 — quality
 
-- [ ] **11. CI** — GitHub Actions: `make test`, examples built with wasi-sdk,
+- [ ] **11. CI** — GitHub Actions: `v fmt -verify`, `make test`, examples built with wasi-sdk,
   browser checks in Chrome.
 - [ ] **12. Docs** — README quickstart; one status/feature matrix; merge the
   overlapping docs; document the real host ABI; remove stale claims.
