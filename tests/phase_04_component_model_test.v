@@ -176,3 +176,62 @@ fn test_compiles_with_stock_v_ignores_interpolation_and_escaped_dollar() {
 	c := analyze(v: greet_v, html: "<p>Cost: $5 {{ 'x\${name}' }}</p>") or { panic(err) }
 	assert c.codegen()!.compiles_with_stock_v
 }
+
+// --- review of #15: regressions (#18 #22 #23 #24 #30) ------------------------
+
+const kw_v = '
+@[component]
+struct Field {
+mut:
+	type  string = "text"
+	it    int    = 7
+	items vcsr.Signal[[]int] = signal([1, 2])
+}
+'
+
+fn test_fields_named_like_soft_keywords_are_qualified() {
+	// #22: V accepts `type`, `it`, … as field names; only where V reads them
+	// as syntax (a cast, `it` inside filter/map/…) do they stay bare
+	c := analyze(
+		v:    kw_v
+		html: '<div><input :type="type"><p>{{ it }} {{ items.filter(it > 1).len }} {{ int(it) }}</p></div>'
+	) or { panic(err) }
+	src := c.codegen()!.source
+	assert src.contains('return runtime.to_str(f.type)')
+	assert src.contains('runtime.to_str(f.it) + ')
+	assert src.contains('runtime.to_str(f.items.get().filter(it > 1).len)')
+	assert src.contains('runtime.to_str(int(f.it))')
+}
+
+fn test_format_specifiers_are_left_alone_by_codegen() {
+	// #23: `:.2f` is not a reference (and not rewritten when a field shares its letter)
+	src := analyze(
+		v:    '@[component]\nstruct Cart {\nmut:\n\tprice vcsr.Signal[f64] = signal(1.5)\n\tf int\n\tx int\n}'
+		html: "<p>{{ '\${price:.2f} \${x:x}' }}</p>"
+	)!.codegen()!.source
+	assert src.contains("runtime.to_str('\${c.price.get():.2f} \${c.x:x}')")
+}
+
+fn test_signals_interpolated_in_a_handler_are_read() {
+	// #24: inside `${}` a signal is always its value, even in an event handler
+	src := greet_src('<button @click="name.set(\'Hello \${name} (\${n + 1})!\')">x</button>')
+	assert src.contains("g.name.set('Hello \${g.name.get()} (\${g.n.get() + 1})!')")
+}
+
+fn test_literal_dollar_words_in_user_strings_still_compile_with_stock_v() {
+	// #30: `$USD` inside a string literal is text, not a comptime builtin
+	for html in ["<p>{{ 'Price: \$USD' }}</p>", '<p :title="\'hi \$name\'">{{ name }}</p>'] {
+		c := analyze(v: greet_v, html: html) or { panic(err) }
+		assert c.codegen()!.compiles_with_stock_v, html
+	}
+}
+
+fn test_no_component_tag_survives_in_the_skeleton() {
+	// the COMPONENTS.md invariant (#18): the browser never sees `<Button>`
+	c := analyze(
+		v:    '@[component]\npub struct Page { vcsr.Component }'
+		html: '<main><Link to="/">Home</Link><Button :label="ok" @click="noop" /><p>x</p></main>'
+	)!
+	assert c.tmpl.html == '<main><!----><!----><p>x</p></main>'
+	assert c.children == ['Link', 'Button']
+}

@@ -174,3 +174,25 @@ fn test_free_idents_sees_inside_string_interpolation_and_past_escapes() {
 		'tail']
 	assert bind.free_idents("'\${user.name}'") == ['user']
 }
+
+// --- review of #15: regressions (#23 #29) ------------------------------------
+
+fn test_format_specifiers_in_interpolations_are_not_identifiers() {
+	// #23: in `${price:.2f}` everything after the first top-level `:` is V's
+	// format spec, not code
+	assert bind.free_idents("'\${price:.2f}'") == ['price']
+	assert bind.free_idents("'\${n:05d}|\${n:x}|\${label:-5s}|\${n:8}'") == ['n', 'label']
+	assert bind.free_idents("'\${m['a:b']:5} \${f(v):x}'") == ['m', 'f', 'v']
+	spec := bind.tokens("'\${n:x}'").filter(it.kind == .str).map(it.text)
+	assert spec == ["'", ':x', "'"]
+	for e in ["'\${price:.2f}'", "'\${m['a:b']:5}'"] {
+		assert bind.tokens(e).map(it.text).join('') == e // still lossless
+	}
+}
+
+fn test_rune_literals_inside_interpolations_do_not_unbalance_braces() {
+	// #29: a `{` or quote rune inside `${}` must not move the closing `}`
+	assert bind.free_idents("'\${`{`} name: \${name}'") == ['name']
+	assert bind.free_idents("'\${`'`} and \${b}'") == ['b']
+	assert bind.free_idents("'\${`\\``} or \${c}'") == ['c']
+}

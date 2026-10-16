@@ -34,15 +34,25 @@ fn tok(kind TokenKind, text string) Token {
 	}
 }
 
-// keywords are never references to the component: V keywords, the builtin type
-// names usable as casts (`int(x)`), and `it` (the implicit param of `filter`,
-// `map`, `any`, `all`).
+// keywords are V's syntax in an expression (`if`, `in`, `none`, …), so they are
+// never references to the component, even if it has a field of that name.
 const keywords = ['as', 'asm', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'else',
 	'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'import', 'in', 'interface', 'is', 'isreftype',
 	'lock', 'match', 'module', 'mut', 'none', 'or', 'pub', 'return', 'rlock', 'select', 'shared',
-	'sizeof', 'spawn', 'static', 'struct', 'true', 'type', 'typeof', 'union', 'unsafe', 'volatile',
-	'bool', 'string', 'rune', 'byte', 'u8', 'u16', 'u32', 'u64', 'usize', 'i8', 'i16', 'int', 'i32',
-	'i64', 'isize', 'f32', 'f64', 'voidptr', 'it']
+	'sizeof', 'spawn', 'static', 'struct', 'true', 'typeof', 'union', 'unsafe', 'volatile']
+
+// soft_keywords are names V reserves that are not syntax in an expression, so a
+// component may use them as a field or method name: `type`, the builtin type
+// names (usable as casts, `int(x)`), and `it` (the implicit param of `filter`,
+// `map`, `any`, `all`, `count`). They lex as .keyword; codegen's qualify still
+// qualifies one the component defines, unless V reads it as syntax there.
+const soft_keywords = ['type', 'bool', 'string', 'rune', 'byte', 'u8', 'u16', 'u32', 'u64', 'usize',
+	'i8', 'i16', 'int', 'i32', 'i64', 'isize', 'f32', 'f64', 'voidptr', 'it']
+
+// is_soft_keyword reports whether `name` is one of soft_keywords.
+pub fn is_soft_keyword(name string) bool {
+	return name in soft_keywords
+}
 
 // tokens splits a template expression into lossless tokens (see the module doc).
 pub fn tokens(expr string) []Token {
@@ -86,7 +96,7 @@ fn lex_into(s string, from int, to int, mut out []Token) {
 			name := s[start..i]
 			kind := if prev_is_dot(out) {
 				TokenKind.member
-			} else if name in keywords {
+			} else if name in keywords || name in soft_keywords {
 				TokenKind.keyword
 			} else {
 				TokenKind.ident
@@ -101,8 +111,9 @@ fn lex_into(s string, from int, to int, mut out []Token) {
 
 // lex_string emits a quoted string starting at `i` (the quote): its literal
 // parts as .str tokens and each `${ expr }` as .interp + the expression's own
-// tokens + .interp, so identifiers inside interpolations are seen too. Returns
-// the index just past the closing quote (or `to` if unterminated).
+// tokens + .interp, so identifiers inside interpolations are seen too. A format
+// spec (`${price:.2f}`) is part of the string: a .str token. Returns the index
+// just past the closing quote (or `to` if unterminated).
 fn lex_string(s string, i0 int, to int, mut out []Token) int {
 	q := s[i0]
 	mut i := i0 + 1
@@ -116,7 +127,11 @@ fn lex_string(s string, i0 int, to int, mut out []Token) int {
 			out << tok(.str, s[seg..i])
 			out << tok(.interp, '\${')
 			close := matching_brace(s, i + 2, to)
-			lex_into(s, i + 2, close, mut out)
+			spec := format_spec_start(s, i + 2, close)
+			lex_into(s, i + 2, spec, mut out)
+			if spec < close {
+				out << tok(.str, s[spec..close])
+			}
 			if close < to {
 				out << tok(.interp, '}')
 				i = close + 1
@@ -134,21 +149,17 @@ fn lex_string(s string, i0 int, to int, mut out []Token) int {
 }
 
 // matching_brace finds the `}` closing a `${` whose body starts at `from`,
-// skipping nested braces and quoted strings; `to` if there is none.
+// skipping nested braces, quoted strings and runes; `to` if there is none.
 fn matching_brace(s string, from int, to int) int {
 	mut depth := 0
 	mut i := from
 	for i < to {
 		c := s[i]
-		if c == `'` || c == `"` {
-			i++
-			for i < to && s[i] != c {
-				if s[i] == `\\` {
-					i++
-				}
-				i++
-			}
-		} else if c == `{` {
+		if c == `'` || c == `"` || c == `\`` {
+			i = skip_quoted(s, i, to)
+			continue
+		}
+		if c == `{` {
 			depth++
 		} else if c == `}` {
 			if depth == 0 {
@@ -159,6 +170,44 @@ fn matching_brace(s string, from int, to int) int {
 		i++
 	}
 	return to
+}
+
+// format_spec_start finds where a `${…}` body's format spec begins: its first
+// `:` outside brackets, braces, parens, strings and runes (V has no `?:`, so
+// that `:` can only start one); `to` if there is none.
+fn format_spec_start(s string, from int, to int) int {
+	mut depth := 0
+	mut i := from
+	for i < to {
+		c := s[i]
+		if c == `'` || c == `"` || c == `\`` {
+			i = skip_quoted(s, i, to)
+			continue
+		}
+		if c in [`(`, `[`, `{`] {
+			depth++
+		} else if c in [`)`, `]`, `}`] {
+			depth--
+		} else if c == `:` && depth == 0 {
+			return i
+		}
+		i++
+	}
+	return to
+}
+
+// skip_quoted returns the index just past the string or rune literal starting
+// at `i` (its quote), honouring backslash escapes.
+fn skip_quoted(s string, i int, to int) int {
+	q := s[i]
+	mut j := i + 1
+	for j < to && s[j] != q {
+		if s[j] == `\\` {
+			j++
+		}
+		j++
+	}
+	return if j < to { j + 1 } else { to }
 }
 
 // scan_number consumes a V numeric literal: decimal with `_` separators, an

@@ -259,11 +259,10 @@ pub fn (c &Component) codegen() !Generated {
 	b.write_string("\treturn '${esc(c.style_src)}'\n")
 	b.write_string('}\n')
 
-	source := b.str()
 	return Generated{
 		filename:              '${lower}.gen.v'
-		source:                source
-		compiles_with_stock_v: !has_comptime_builtin(source) // no `$vui`/`$css`/… → stock V compiles it
+		source:                b.str()
+		compiles_with_stock_v: !c.tmpl.slots.any(uses_comptime_builtin(it)) // no `$vui`/`$css`/… → stock V compiles it
 	}
 }
 
@@ -360,24 +359,33 @@ fn (c &Component) text_value(s slots.SlotDesc) string {
 // `recv.name`, and anything else (a @for loop variable, an external) is left as
 // is. It works on bind.tokens, so member tails, literals, keywords and builtin
 // type names pass through untouched, and identifiers inside `${}` string
-// interpolations are qualified too.
+// interpolations are qualified too — always as values, since a string can only
+// interpolate one. A field named like a soft keyword (`type`, `it`) is
+// qualified unless V reads the name as syntax there (see soft_keyword_is_syntax).
 fn (c &Component) qualify(expr string, value_ctx bool) string {
 	recv := c.recv()
 	toks := bind.tokens(expr)
 	mut out := strings.new_builder(expr.len + 16)
+	mut interp := 0 // depth of the `${…}` we are in
 	for i, t in toks {
-		if t.kind != .ident {
+		if t.kind == .interp {
+			interp += if t.text == '}' { -1 } else { 1 }
+		}
+		is_ref := t.kind == .ident || (t.kind == .keyword && bind.is_soft_keyword(t.text)
+			&& c.resolves_ref(t.text) && !soft_keyword_is_syntax(toks, i))
+		if !is_ref {
 			out.write_string(t.text)
 			continue
 		}
 		name := t.text
+		value := value_ctx || interp > 0
 		if c.is_signal(name) {
-			out.write_string('${recv}.${name}' + if value_ctx { '.get()' } else { '' })
+			out.write_string('${recv}.${name}' + if value { '.get()' } else { '' })
 		} else if c.has_method(name) && !c.is_field(name) {
 			// A computed: a bare method in a value context is CALLED
 			// (`{{ doubled }}` → `c.doubled()`), unless the template already
 			// wrote the parens; in an event context it stays a method value.
-			if value_ctx && !next_is_call(toks, i) {
+			if value && !next_is_call(toks, i) {
 				out.write_string('${recv}.${name}()')
 			} else {
 				out.write_string('${recv}.${name}')
@@ -390,6 +398,42 @@ fn (c &Component) qualify(expr string, value_ctx bool) string {
 	}
 	return out.str()
 }
+
+// soft_keyword_is_syntax reports whether the soft keyword at toks[i] is V syntax
+// there rather than a reference: a builtin type name called as a cast
+// (`int(x)`), or `it` inside the argument of `filter`/`map`/`any`/`all`/`count`.
+fn soft_keyword_is_syntax(toks []bind.Token, i int) bool {
+	if toks[i].text != 'it' {
+		return toks[i].text != 'type' && next_is_call(toks, i)
+	}
+	mut depth := 0
+	for k := i - 1; k >= 0; k-- {
+		if toks[k].kind != .punct {
+			continue
+		}
+		if toks[k].text == ')' {
+			depth++
+		} else if toks[k].text == '(' {
+			if depth > 0 {
+				depth--
+				continue
+			}
+			for m := k - 1; m >= 0; m-- {
+				if toks[m].kind == .space {
+					continue
+				}
+				if toks[m].kind == .member && toks[m].text in it_methods {
+					return true
+				}
+				break
+			}
+		}
+	}
+	return false
+}
+
+// it_methods are V's array methods whose argument sees the element as `it`.
+const it_methods = ['filter', 'map', 'any', 'all', 'count']
 
 // next_is_call reports whether the token after `i` (skipping spaces) opens a
 // call: `doubled ()`.
@@ -689,13 +733,21 @@ fn esc(s string) string {
 	return s.replace('\\', '\\\\').replace("'", "\\'").replace('$', '\\$')
 }
 
-// has_comptime_builtin reports whether V source uses a compile-time builtin
-// (`$vui`, `$embed_file`, `$if`, …): a `$` followed by a letter. A `${…}`
-// interpolation and an escaped `\$` are not builtins.
-fn has_comptime_builtin(src string) bool {
-	for i := 0; i + 1 < src.len; i++ {
-		if src[i] == `$` && (i == 0 || src[i - 1] != `\\`) && bind.is_ident_start(src[i + 1]) {
-			return true
+// uses_comptime_builtin reports whether a slot's expressions, the only code the
+// template puts in the generated file, use a compile-time builtin (`$vui`,
+// `$embed_file`, `$if`, …): a `$` in code followed by a name. `$` inside a string
+// literal (`'$USD'`) is text; vcsr's own code and the escaped template text never
+// contain one.
+fn uses_comptime_builtin(s slots.SlotDesc) bool {
+	mut exprs := s.text_exprs()
+	exprs << [s.expr, s.handler, s.target_expr, s.cond_expr, s.source_expr, s.key_expr]
+	for e in exprs {
+		toks := bind.tokens(e)
+		for k := 0; k + 1 < toks.len; k++ {
+			if toks[k].kind == .punct && toks[k].text == '$'
+				&& toks[k + 1].kind in [.ident, .keyword, .member] {
+				return true
+			}
 		}
 	}
 	return false
