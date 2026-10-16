@@ -48,9 +48,11 @@ fn test_shared_component_hoisted_to_core_not_duplicated() {
 	plan := router.plan_with_usage([
 		Route{ path: '/', component: 'Home', lazy: false },
 		Route{ path: '/reports', component: 'Reports', lazy: true },
-	], component_usage: {
-		'Button': ['/', '/reports']
-	})!
+	],
+		component_usage: {
+			'Button': ['/', '/reports']
+		}
+	)!
 	assert 'Button' in plan.core_components()
 	assert 'Button' !in plan.chunk('reports').components
 }
@@ -58,9 +60,11 @@ fn test_shared_component_hoisted_to_core_not_duplicated() {
 fn test_route_local_component_stays_in_chunk() {
 	plan := router.plan_with_usage([
 		Route{ path: '/reports', component: 'Reports', lazy: true },
-	], component_usage: {
-		'ReportRow': ['/reports']
-	})!
+	],
+		component_usage: {
+			'ReportRow': ['/reports']
+		}
+	)!
 	assert 'ReportRow' in plan.chunk('reports').components
 	assert 'ReportRow' !in plan.core_components()
 }
@@ -69,10 +73,12 @@ fn test_chunk_carries_only_its_own_templates() {
 	plan := router.plan_with_usage([
 		Route{ path: '/', component: 'Home' },
 		Route{ path: '/reports', component: 'Reports', lazy: true },
-	], component_usage: {
-		'Button':    ['/', '/reports']
-		'ReportRow': ['/reports']
-	})!
+	],
+		component_usage: {
+			'Button':    ['/', '/reports']
+			'ReportRow': ['/reports']
+		}
+	)!
 	c := plan.chunk('reports')
 	assert c.components == ['Reports', 'ReportRow'] // Button is shared → core
 }

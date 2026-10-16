@@ -32,8 +32,8 @@ pub struct Plan {
 pub:
 	routes []Route
 mut:
-	core     []string
-	chunks   map[string]Chunk
+	core           []string
+	chunks         map[string]Chunk
 	fallback_route Route
 	has_fallback   bool
 }

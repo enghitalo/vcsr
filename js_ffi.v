@@ -63,7 +63,7 @@ const js_h_global = 2
 fn js_ensure() {
 	if js_cells.len == 0 {
 		js_cells << JsUndefined{} // 0
-		js_cells << JsNull{}      // 1
+		js_cells << JsNull{} // 1
 		js_cells << JsObject{
 			props: map[string]int{}
 		} // 2: the global object

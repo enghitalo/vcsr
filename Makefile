@@ -9,7 +9,16 @@ PREFIX ?= $(HOME)/.local
 BIN     := $(PREFIX)/bin/vcsr
 V       ?= v
 
-.PHONY: build install update test examples screenshots browser-deps clean help
+.PHONY: build install update test examples screenshots browser-deps clean help fmt fmt-verify
+
+# V files tracked for formatting in cycle 1
+FMT_FILES := bench/parse_bench.v examples/spa/src/components/todos.v js_ffi.v router/router.v tests/phase_06_router_codesplit_test.v tests/phase_13_runtime_ffi_test.v tests/phase_14_runtime_engine_test.v wasm/wasm.v
+
+fmt: ## format tracked V sources
+	$(V) fmt -w $(FMT_FILES)
+
+fmt-verify: ## verify tracked V sources are formatted
+	$(V) fmt -verify $(FMT_FILES)
 
 # examples that build to wasm: those with a browser entry in src/
 WASM_EXAMPLES := $(patsubst %/src/entry_d_wasm_browser.v,%,$(wildcard examples/*/src/entry_d_wasm_browser.v))

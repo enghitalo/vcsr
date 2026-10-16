@@ -85,4 +85,3 @@ fn test_release_frees_and_reuses_the_slot() {
 	assert b.handle == h
 	assert b.str() == 'reused'
 }
-

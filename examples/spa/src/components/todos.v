@@ -17,7 +17,7 @@ pub struct TodoList {
 mut:
 	items   Signal[[]Todo] = signal([]Todo{})
 	draft   Signal[string] = signal('')
-	next_id int = 1
+	next_id int            = 1
 }
 
 // Exposed to the template as `{{ remaining }}` (memoized computed).
