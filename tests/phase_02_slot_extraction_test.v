@@ -204,5 +204,67 @@ fn test_entities_in_text_slot_parts_are_decoded() {
 	// textContent doesn't decode entities, so literal parts arrive decoded
 	ct := compile('<p>&copy; {{ year }} &mdash; a &amp; b &lt; c &#x2713; &#65; &bogus; &</p>')
 	assert ct.slots[0].parts.map(it.text) == ['© ', 'year', ' — a & b < c ✓ A &bogus; &']
-	assert slots.decode_entities('no entities') == 'no entities'
+	assert parser.decode_entities('no entities') == 'no entities'
+}
+
+// --- review of #15: regressions (#18 #21 #27 #31) ----------------------------
+
+fn test_components_leave_a_mount_anchor_not_their_tag() {
+	// #18 + docs/COMPONENTS.md: a component tag never reaches the browser's
+	// parser (`<Link>` would become a void <link>); until child components
+	// render (roadmap 7) it leaves an anchor, and its content no slots
+	ct := compile('<nav><Link to="/a"><b>{{ x }}</b></Link><i>{{ y }}</i><Input/></nav>')
+	assert ct.html == '<nav><!----><i></i><!----></nav>'
+	assert ct.slots.len == 1 && ct.slots[0].path == [0] && ct.slots[0].parts[0].text == 'y'
+	// the anchor counts: a later anchored slot in the same container shifts
+	ct2 := compile('<p><Badge/>{{ a }}<b>!</b></p>')
+	assert ct2.html == '<p><!----><!----><b>!</b></p>'
+	assert ct2.slots[0].anchor == 1
+}
+
+fn test_a_component_root_is_an_error() {
+	tree := parser.parse_template('<Card><p>x</p></Card>') or { panic(err) }
+	slots.compile(tree) or {
+		assert err.msg().contains('<Card>') && err.msg().contains('root')
+		return
+	}
+	assert false, 'expected an error for a component root'
+}
+
+fn test_text_slot_parts_decode_every_html5_reference() {
+	// #21: a text slot is set through textContent, so its literal parts are
+	// decoded at build time with the browser's full table and rules
+	parts := fn (src string) []string {
+		return compile('<p>${src}{{ x }}</p>').slots[0].parts.map(it.text)
+	}
+	assert parts('Don&rsquo;t &ge; &ne; &eacute;t&eacute; &frac12; &pound; &notin; &AMP; ') == [
+		'Don’t ≥ ≠ été ½ £ ∉ & ',
+		'x',
+	]
+	assert parts('&copy 2026 &amp &lt3 &notin &ampx ') == ['© 2026 & <3 ¬in &x ', 'x'] // legacy, no `;`
+	assert parts('&#65 &#x41 b &#169abc; &#00000000065; ') == ['A A b ©abc; A ', 'x']
+	assert parts('&#150;&#x80;&#x9F;&#0;&#x110000;&#xD800;&#4294967361;&#x1_F600;') == [
+		'–€Ÿ����\u0001_F600;',
+		'x',
+	]
+	assert parts('&bogus; & &#; &#x; &; ') == ['&bogus; & &#; &#x; &; ', 'x']
+}
+
+fn test_pre_keeps_an_authored_leading_newline_through_the_skeleton() {
+	// #27: the parser drops the newline after <pre>; one the author wrote
+	// after that must survive the browser's own drop, so it is doubled
+	assert compile('<div><pre>\n\nkept</pre></div>').html == '<div><pre>\n\nkept</pre></div>'
+	assert compile('<div><pre>\nplain</pre></div>').html == '<div><pre>plain</pre></div>'
+	assert compile('<div><pre>\n{{ code }}\n</pre></div>').slots[0].parts.map(it.text) == [
+		'code',
+		'\n',
+	]
+}
+
+fn test_a_lt_that_is_text_is_escaped_in_the_skeleton() {
+	// #31: `<?…` is text to vcsr but a bogus comment to the browser, which
+	// would shift the anchors; `<` written as text is escaped
+	ct := compile('<div><b>x</b> write <?xml version="1.0"?> 1 < 2, then {{ y }}<i>{{ z }}</i></div>')
+	assert ct.html == '<div><b>x</b> write &lt;?xml version="1.0"?> 1 &lt; 2, then <!----><i></i></div>'
+	assert ct.slots[0].anchor == 0
 }

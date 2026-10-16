@@ -32,6 +32,9 @@ pub:
 // comment `<!---->` in the skeleton (user comments never reach the skeleton, so
 // every comment there is an anchor), and its slot is addressed as `path` (the
 // container element) + `anchor` (which of the container's comment children).
+// A child component leaves one too: its tag never reaches the browser's parser
+// (which would read `<Link>` as a void <link>), and until child components
+// render (roadmap 7) the anchor marks where it mounts.
 pub const anchor_html = '<!---->'
 
 pub struct SlotDesc {
@@ -64,6 +67,9 @@ pub mut:
 
 // compile turns a parsed template Tree into its static skeleton + slot table.
 pub fn compile(tree ast.Tree) !CompiledTemplate {
+	if tree.root.kind == .component {
+		return error('the root of a template must be an HTML element, not the component <${tree.root.tag}>: wrap it in one')
+	}
 	return compile_node(tree.root)!
 }
 
@@ -79,6 +85,9 @@ fn compile_node(root ast.Node) !CompiledTemplate {
 // serialize emits the static HTML for `node` (placed at `path`) and appends any
 // slots it contributes to `sl`.
 fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
+	if node.kind == .component {
+		return anchor_html // the root of a @for/@if row (the rows don't render yet)
+	}
 	mut s := '<' + node.tag
 	for a in node.attrs {
 		s += ' ${a.name}="${a.value.replace('"', '&quot;')}"'
@@ -125,7 +134,11 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 				is_expr: ch.kind == .interpolation
 				// literal text is set via textContent, which doesn't decode
 				// entities the way the skeleton's HTML parse does — decode here
-				text:    if ch.kind == .interpolation { ch.expr } else { decode_entities(ch.text) }
+				text:    if ch.kind == .interpolation {
+					ch.expr
+				} else {
+					parser.decode_entities(ch.text)
+				}
 			}
 		}
 		sl << SlotDesc{
@@ -137,10 +150,23 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 	} else {
 		mut ei := 0 // element-child index (text/anchors don't advance it)
 		mut ai := 0 // anchor index among this element's comment children
+		if node.tag in preserve_newline_elements && children.len > 0
+			&& children[0].kind == .text && children[0].text.starts_with('\n') {
+			// the browser drops a newline right after the start tag, as the
+			// parser did; write one more, so the one the author kept survives
+			s += '\n'
+		}
 		for child in children {
 			match child.kind {
 				.text {
-					s += child.text
+					// a `<` that is text here could be markup to the browser
+					// (`<?xml` is a bogus comment there, shifting the anchors);
+					// <script>/<style> bodies are raw text, written as is
+					s += if node.tag in raw_text_elements {
+						child.text
+					} else {
+						child.text.replace('<', '&lt;')
+					}
 				}
 				.comment {}
 				.interpolation {
@@ -184,6 +210,9 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 						}
 						s += anchor_html
 						ai++
+					} else if child.kind == .component {
+						s += anchor_html // where it mounts (roadmap 7); see anchor_html
+						ai++
 					} else {
 						mut cp := path.clone()
 						cp << ei
@@ -211,74 +240,8 @@ fn strip_cond(node ast.Node) ast.Node {
 	return c
 }
 
-// named_entities maps the HTML character references templates commonly use.
-const named_entities = {
-	'amp':    '&'
-	'lt':     '<'
-	'gt':     '>'
-	'quot':   '"'
-	'apos':   "'"
-	'nbsp':   '\u00a0'
-	'copy':   '©'
-	'reg':    '®'
-	'trade':  '™'
-	'hellip': '…'
-	'mdash':  '—'
-	'ndash':  '–'
-	'middot': '·'
-	'bull':   '•'
-	'times':  '×'
-	'divide': '÷'
-	'deg':    '°'
-	'euro':   '€'
-	'laquo':  '«'
-	'raquo':  '»'
-	'larr':   '←'
-	'rarr':   '→'
-	'uarr':   '↑'
-	'darr':   '↓'
-	'hearts': '♥'
-	'check':  '✓'
-}
+// preserve_newline_elements: HTML drops a newline right after their start tag.
+const preserve_newline_elements = ['pre', 'textarea', 'listing']
 
-// decode_entities turns HTML character references (`&amp;`, `&#169;`,
-// `&#x1F600;`) into the characters they name; an unknown or malformed `&…`
-// is left as written, like a browser does.
-pub fn decode_entities(s string) string {
-	if !s.contains('&') {
-		return s
-	}
-	mut out := []u8{cap: s.len}
-	mut i := 0
-	for i < s.len {
-		if s[i] == `&` {
-			semi := s.index_after(';', i + 1) or { -1 }
-			if semi > i + 1 && semi - i <= 12 {
-				name := s[i + 1..semi]
-				mut decoded := ''
-				if name.starts_with('#x') || name.starts_with('#X') {
-					decoded = codepoint_str(u32(('0x' + name[2..]).parse_uint(0, 32) or { 0 }))
-				} else if name.starts_with('#') {
-					decoded = codepoint_str(u32(name[1..].parse_uint(10, 32) or { 0 }))
-				} else {
-					decoded = named_entities[name] or { '' }
-				}
-				if decoded != '' {
-					out << decoded.bytes()
-					i = semi + 1
-					continue
-				}
-			}
-		}
-		out << s[i]
-		i++
-	}
-	return out.bytestr()
-}
-
-fn codepoint_str(cp u32) string {
-	if cp == 0 || cp > 0x10FFFF {
-		return ''
-	}
-	return rune(cp).str()
-}
+// raw_text_elements: HTML reads their bodies verbatim (no tags, no references).
+const raw_text_elements = ['script', 'style']
