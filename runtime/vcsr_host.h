@@ -16,11 +16,11 @@ VCSR_IMPORT(host_slot_at)           int  host_slot_at(int root, const int* path,
 VCSR_IMPORT(host_anchor_at)         int  host_anchor_at(int node, int k);
 VCSR_IMPORT(host_anchor_text)       int  host_anchor_text(int node, int k);
 
-// per-node mutations (the reactive patches)
+// per-node mutations (the reactive patches); host_set_text on an anchor comment
+// sets its data
 VCSR_IMPORT(host_set_text)    void host_set_text(int node, const unsigned char* ptr, int len);
 VCSR_IMPORT(host_set_attr)    void host_set_attr(int node, const unsigned char* np, int nl, const unsigned char* vp, int vl);
 VCSR_IMPORT(host_set_value)   void host_set_value(int node, const unsigned char* ptr, int len);
-VCSR_IMPORT(host_set_visible) void host_set_visible(int node, int visible);
 
 // events: register a wasm callback index; host calls vcsr_dispatch / vcsr_dispatch_input back
 VCSR_IMPORT(host_on)       void host_on(int node, const unsigned char* ev, int el, int cb_idx);

@@ -33,8 +33,8 @@ pub enum SlotKind {
 	attr  // an attribute value follows an expression (`name`)
 	event // a DOM event runs a handler (`name` = event, e.g. 'click')
 	bind  // two-way: value follows an expression AND writes back on input
-	cond  // @if: the element is present only while the expression is true
-	list  // @for: a keyed list of rows
+	cond  // @if: an anchor; its row shows while the expression is true (roadmap 4)
+	list  // @for: an anchor; a keyed list of rows (roadmap 5)
 }
 
 // SlotDesc locates one hole and says what it is. Emitted as a plain const by
@@ -52,6 +52,18 @@ pub struct Template {
 pub:
 	html  string
 	slots []SlotDesc
+}
+
+// cond_anchor_text and list_anchor_text are what an @if / @for anchor comment
+// reads while the runtime cannot render their rows yet (roadmap items 4 and 5):
+// the live condition and item count, so the binding is observable on both
+// backends (`<!--@if true-->`, `<!--@for 3-->`) and never touches an element.
+fn cond_anchor_text(on bool) string {
+	return if on { '@if true' } else { '@if false' }
+}
+
+fn list_anchor_text(n int) string {
+	return '@for ${n}'
 }
 
 // to_str renders any bound value to text. Codegen wraps every text/attr/value

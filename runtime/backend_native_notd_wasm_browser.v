@@ -1,8 +1,11 @@
 // The NATIVE rendering backend (default; compiled when -d wasm_browser is NOT set).
 //
-// An in-memory mock DOM (`Node` tree) built by reusing vcsr's own template parser,
-// so the whole engine is testable without a browser. `instance()` clones the
-// skeleton; bind_*(_ctx) wire each slot to a reactive effect; html() serializes.
+// An in-memory mock DOM (`Node` tree), so the whole engine is testable without a
+// browser. It reads a skeleton the way the browser does (parser.parse_html:
+// references decoded, whitespace as written) and html() serializes the tree the
+// way the browser's innerHTML does, so a native test sees what Chrome shows.
+// `instance()` clones the skeleton; bind_*(_ctx) wire each slot to a reactive
+// effect; html() serializes.
 // The wasm backend (backend_wasm_d_wasm_browser.v) presents the SAME public API
 // (Template.instance / bind_*_ctx / Instance.view / View) but drives the real DOM
 // through host FFI and holds no maps (string-keyed maps don't run on wasm — see
@@ -14,22 +17,23 @@ import vcsr
 import vcsr.ast
 import vcsr.parser
 
-// Node is a DOM node — the NATIVE mock backend (an in-memory tree). A node is
-// either a text node (`is_text`, content in `text`) or an element. `children` is
-// the ORDERED child list — text and element nodes interleaved as in the source —
-// so serialization preserves order; `path` indexing counts only element children
-// (see element_child), matching the element-child-index paths phase 02 emits.
+// Node is a DOM node — the NATIVE mock backend (an in-memory tree). A node is a
+// text node (`is_text`), a comment (`is_comment`) or an element; `text` holds a
+// text or comment node's content, decoded as in the DOM. `children` is the
+// ORDERED child list — text, comment and element nodes interleaved as in the
+// source — so serialization preserves order; `path` indexing counts only element
+// children (see element_child), matching the element-child-index paths phase 02
+// emits.
 @[heap]
 struct Node {
 mut:
 	is_text    bool // text node: `text` is the content; tag/attrs/children unused
 	is_comment bool // comment node: a slot anchor (`<!---->`) in a skeleton
 	tag        string
-	text       string // text-node content
+	text       string // text/comment content
 	attrs      map[string]string
-	value      string // form value (two-way bind)
-	visible    bool = true // @if toggle
-	children   []&Node          // ordered: text nodes + element nodes
+	value      string           // form value (two-way bind)
+	children   []&Node          // ordered: text, comment and element nodes
 	on         map[string]fn () // event name → handler (closure form, native)
 	on_input   fn (v string) = unsafe { nil } // two-way input writer (closure form, native)
 	// closure-FREE handler slots (what codegen emits; wasm-safe — see signal.v):
@@ -51,10 +55,11 @@ struct InputHandler {
 	ctx voidptr
 }
 
-// set_text sets a node's textContent like the DOM setter: a text node takes the
-// string as its content; an element's children are replaced by one text node.
+// set_text sets a node's textContent like the DOM setter: a text or comment
+// node takes the string as its content; an element's children are replaced by
+// one text node.
 fn (mut n Node) set_text(s string) {
-	if n.is_text {
+	if n.is_text || n.is_comment {
 		n.text = s
 		return
 	}
@@ -154,25 +159,25 @@ pub fn bind_value(mut ins Instance, i int, get fn () string, set fn (v string)) 
 	node.on_input = set
 }
 
-// bind_if makes a slot element present only while `get` is true.
+// bind_if keeps an @if anchor's condition live (see cond_anchor_text).
 pub fn bind_if(mut ins Instance, i int, get fn () bool) {
 	mut node := ins.slots[i]
 	ins.effects << vcsr.effect_handle(fn [mut node, get] () {
-		node.visible = get()
+		node.set_text(cond_anchor_text(get()))
 	})
 }
 
-// bind_list tracks a keyed list's length reactively.
+// bind_list keeps an @for anchor's item count live (see list_anchor_text).
 //
 // NOTE: the codegen contract currently supplies only the row COUNT (`fn () int`).
 // Per-row cloning + keyed (`:key`) reconciliation — the real payoff — needs the
 // row sub-template and a render closure, which is the next codegen↔runtime
-// co-design step (DESIGN.md). Until then this keeps the length dependency live
-// (exposed as `data-count`) so the wiring is correct and observable.
+// co-design step (DESIGN.md, roadmap 5). Until then this keeps the length
+// dependency live, shown on the anchor, so the wiring is correct and observable.
 pub fn bind_list(mut ins Instance, i int, count fn () int) {
 	mut node := ins.slots[i]
 	ins.effects << vcsr.effect_handle(fn [mut node, count] () {
-		node.attrs['data-count'] = count().str()
+		node.set_text(list_anchor_text(count()))
 	})
 }
 
@@ -283,10 +288,10 @@ struct IfBind {
 fn patch_if(p voidptr) {
 	b := unsafe { &IfBind(p) }
 	mut n := b.node
-	n.visible = b.get(b.ctx)
+	n.set_text(cond_anchor_text(b.get(b.ctx)))
 }
 
-// bind_if_ctx makes slot `i` present only while `get(ctx)` is true.
+// bind_if_ctx keeps @if anchor `i`'s condition `get(ctx)` live.
 pub fn bind_if_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) bool) {
 	b := &IfBind{
 		node: ins.slots[i]
@@ -306,10 +311,10 @@ struct ListBind {
 fn patch_list(p voidptr) {
 	b := unsafe { &ListBind(p) }
 	mut n := b.node
-	n.attrs['data-count'] = b.count(b.ctx).str()
+	n.set_text(list_anchor_text(b.count(b.ctx)))
 }
 
-// bind_list_ctx tracks a keyed list's length reactively (count(ctx)).
+// bind_list_ctx keeps @for anchor `i`'s item count `count(ctx)` live.
 pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr) int) {
 	b := &ListBind{
 		node:  ins.slots[i]
@@ -364,22 +369,21 @@ pub fn (ins Instance) value_of(i int) string {
 
 // --- the native mock DOM ----------------------------------------------------
 
-// build_tree parses the static skeleton into an element tree, reusing vcsr's own
-// template parser so the element-child indexing matches the emitted paths.
+// build_tree parses the static skeleton into a node tree the way the browser
+// does (parser.parse_html), so the element-child indexing matches the emitted
+// paths and the text matches the page. vcsr emitted the skeleton, so one that
+// does not parse is a bug in vcsr: fail loudly.
 fn build_tree(html string) &Node {
-	tree := parser.parse_template(html) or {
-		return &Node{
-			tag: 'div'
-		}
+	tree := parser.parse_html(html) or {
+		panic('vcsr: the native mock cannot parse a compiled skeleton (${err.msg()}): ${html}')
 	}
 	return convert(tree.root)
 }
 
 // convert turns an AST element into a mock Node, preserving child ORDER: static
-// attrs carried over; text children become text nodes in place; element and
-// component children are recursed. (Interpolation children don't appear — the
-// skeleton's holes are emptied.) Text nodes stay in `children` so they keep
-// their position relative to elements.
+// attrs carried over; text and comment children become text and comment nodes
+// in place; element children are recursed. Text nodes stay in `children` so
+// they keep their position relative to elements.
 fn convert(n ast.Node) &Node {
 	mut node := &Node{
 		tag: n.tag
@@ -401,9 +405,10 @@ fn convert(n ast.Node) &Node {
 			.comment {
 				node.children << &Node{
 					is_comment: true
+					text:       ch.text
 				}
 			}
-			.interpolation {} // skeleton holes are emptied; none here
+			.interpolation {} // HTML has none
 		}
 	}
 	return node
@@ -463,35 +468,62 @@ fn element_child(n &Node, idx int) &Node {
 	return n
 }
 
-// html serializes the live tree (an @if-hidden element renders as nothing).
+// html serializes the live tree the way the browser's outerHTML does: text and
+// attribute values escaped, comments and void elements as HTML writes them.
 pub fn (v View) html() string {
 	mut sb := strings.new_builder(128)
-	write_html(mut sb, v.root)
+	write_html(mut sb, v.root, false)
 	return sb.str()
 }
 
-fn write_html(mut sb strings.Builder, n &Node) {
+// raw_text_parents: the DOM serializer writes their text children unescaped.
+const raw_text_parents = ['style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext']
+
+fn write_html(mut sb strings.Builder, n &Node, raw bool) {
 	if n.is_text {
-		sb.write_string(n.text)
+		sb.write_string(if raw { n.text } else { escape_html(n.text, false) })
 		return
 	}
 	if n.is_comment {
-		sb.write_string('<!---->')
-		return
-	}
-	if !n.visible {
+		sb.write_string('<!--${n.text}-->')
 		return
 	}
 	sb.write_string('<${n.tag}')
 	for k, val in n.attrs {
-		sb.write_string(' ${k}="${val}"')
+		sb.write_string(' ${k}="${escape_html(val, true)}"')
 	}
 	sb.write_string('>')
 	if parser.is_void(n.tag) {
 		return
 	}
 	for ch in n.children {
-		write_html(mut sb, ch)
+		write_html(mut sb, ch, n.tag in raw_text_parents)
 	}
 	sb.write_string('</${n.tag}>')
+}
+
+// escape_html escapes text the way the HTML serializer does: `&`, a no-break
+// space, `<` and `>`, plus `"` in an attribute value.
+fn escape_html(s string, in_attr bool) string {
+	mut out := strings.new_builder(s.len + 8)
+	mut i := 0
+	for i < s.len {
+		c := s[i]
+		if c == `&` {
+			out.write_string('&amp;')
+		} else if c == `<` {
+			out.write_string('&lt;')
+		} else if c == `>` {
+			out.write_string('&gt;')
+		} else if c == `"` && in_attr {
+			out.write_string('&quot;')
+		} else if c == 0xC2 && i + 1 < s.len && s[i + 1] == 0xA0 {
+			out.write_string('&nbsp;') // U+00A0 in UTF-8
+			i++
+		} else {
+			out.write_u8(c)
+		}
+		i++
+	}
+	return out.str()
 }

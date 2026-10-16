@@ -59,11 +59,10 @@ export async function boot(wasmUrl = './core.wasm') {
       a.parentNode.insertBefore(t, a);
       return ref(t);
     },
-    // patches
+    // patches (textContent on an anchor comment sets its data)
     host_set_text(h, p, l) { H[h].textContent = rd(p, l); },
     host_set_attr(h, np, nl, vp, vl) { H[h].setAttribute(rd(np, nl), rd(vp, vl)); },
     host_set_value(h, p, l) { H[h].value = rd(p, l); },
-    host_set_visible(h, v) { H[h].style.display = v ? '' : 'none'; },
     // events: the module is called back by index; default actions are left alone
     host_on(h, ep, el, cb) { H[h].addEventListener(rd(ep, el), () => dispatch(cb)); },
     host_on_input(h, cb) {

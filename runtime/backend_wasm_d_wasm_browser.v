@@ -5,9 +5,11 @@
 // the DOM and the template. The V side holds only integer node HANDLES (in arrays)
 // and the reactive logic — NO string-keyed maps and NO V template parser, both of
 // which fail on wasm (see docs/WASM-PATHS-ANALYSIS.md §2.1). Every DOM mutation is
-// an imported (ptr,len)/(handle) FFI call; events come back through the exported
-// vcsr_dispatch / vcsr_dispatch_input. Build with -gc none -enable-globals and
-// clang -I <repo>/runtime (for vcsr_host.h).
+// an imported (ptr,len)/(handle) FFI call; events come back through
+// vcsr_dispatch / vcsr_dispatch_input, which host_init hands the host as
+// function pointers (indices into the exported indirect function table, see
+// init_host). Build with -gc none -enable-globals and clang -I <repo>/runtime
+// (for vcsr_host.h).
 module runtime
 
 import vcsr
@@ -23,7 +25,6 @@ fn C.host_anchor_text(node int, k int) int
 fn C.host_set_text(node int, ptr &u8, len int)
 fn C.host_set_attr(node int, np &u8, nl int, vp &u8, vl int)
 fn C.host_set_value(node int, ptr &u8, len int)
-fn C.host_set_visible(node int, visible int)
 fn C.host_on(node int, ev &u8, el int, cb_idx int)
 fn C.host_on_input(node int, cb_idx int)
 fn C.host_mount(root int, sel &u8, len int)
@@ -177,9 +178,12 @@ struct IfBind {
 	get    fn (ctx voidptr) bool = unsafe { nil }
 }
 
+// patch_if writes the live condition onto the @if anchor comment (the row
+// itself renders at roadmap 4; see cond_anchor_text).
 fn patch_if(p voidptr) {
 	b := unsafe { &IfBind(p) }
-	C.host_set_visible(b.handle, if b.get(b.ctx) { 1 } else { 0 })
+	s := cond_anchor_text(b.get(b.ctx))
+	C.host_set_text(b.handle, s.str, s.len)
 }
 
 pub fn bind_if_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) bool) {
@@ -198,11 +202,12 @@ struct ListBind {
 	count  fn (ctx voidptr) int = unsafe { nil }
 }
 
+// patch_list writes the live item count onto the @for anchor comment (the rows
+// render at roadmap 5; see list_anchor_text).
 fn patch_list(p voidptr) {
 	b := unsafe { &ListBind(p) }
-	s := b.count(b.ctx).str()
-	name := 'data-count'
-	C.host_set_attr(b.handle, name.str, name.len, s.str, s.len)
+	s := list_anchor_text(b.count(b.ctx))
+	C.host_set_text(b.handle, s.str, s.len)
 }
 
 pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr) int) {
@@ -279,13 +284,14 @@ pub fn vcsr_input_ptr(need int) int {
 }
 
 // vcsr_dispatch_input is the host's entry point on a two-way input event: it reads
-// the new value (written at ptr,len) and runs the registered writer.
+// the new value (written at ptr,len) and runs the registered writer. The value is
+// COPIED out of the scratch buffer, which the next input event overwrites.
 pub fn vcsr_dispatch_input(idx int, ptr &u8, len int) {
 	if idx < 0 || idx >= vcsr_wasm_inputs.len {
 		return
 	}
 	r := vcsr_wasm_inputs[idx]
-	s := unsafe { ptr.vstring_with_len(len) }
+	s := unsafe { ptr.vstring_with_len(len) }.clone()
 	if r.set != unsafe { nil } {
 		r.set(r.ctx, s)
 	}
