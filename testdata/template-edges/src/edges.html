@@ -1,0 +1,45 @@
+<!-- The edge cases the review of PR #15 found (#16–#33). Both checks compare
+     the render with ../expected.html. -->
+<main class="edges">
+  <!-- #16 #28: @if/@for mount; their rows render at roadmap 4/5, until then
+       the anchor shows the live condition and count -->
+  <section class="if"><p @if="open">shown</p><button class="toggle" @click="toggle">toggle</button></section>
+  <ul class="for"><li @for="x in items">{{ x }}</li></ul>
+  <button class="add" @click="add">add</button>
+
+  <!-- #17: two bound inputs, each keeps its own string -->
+  <input class="first" @bind="first"><input class="last" @bind="last">
+  <p class="who">Hello, {{ first }} {{ last }}!</p>
+
+  <!-- #24: a signal inside ${} in a handler is its value -->
+  <button class="greet" @click="msg.set('Hi ${first}!')">greet</button>
+  <p class="msg">{{ msg }}</p>
+
+  <!-- #23: format specifiers; #22: a field named like a keyword -->
+  <p class="fmt">{{ '${price:.2f} ${n:05d} ${n:x}' }}</p>
+  <input class="kw" :type="type">
+
+  <!-- #21: every HTML5 reference decodes in a text slot as in static text -->
+  <p class="ent">Don&rsquo;t &ge; &eacute;t&eacute; &copy 2026 {{ n }}</p>
+  <p class="ent-static">Don&rsquo;t &ge; &eacute;t&eacute; &copy 2026 255</p>
+
+  <!-- #25: escaped markup stays text -->
+  <p class="esc">Use &lt;b&gt; &amp; {{ first }}</p>
+
+  <!-- #20: the {{{{ escape; #31: <? is text, and the anchor after it stays put -->
+  <p class="brace"><b>{{ n }}</b> type {{{{ to open</p>
+  <p class="pi">write <?xml?> then {{ n }}<i>!</i></p>
+
+  <!-- #27: <pre>/<textarea> drop the newline after the start tag -->
+  <pre class="pre">
+{{ code }}</pre>
+  <textarea class="ta">
+{{ code }}</textarea>
+
+  <!-- #33: the space a dropped comment leaves is kept -->
+  <span class="ws"><!-- c --> <b>b</b></span>
+
+  <!-- #18: a component named like an HTML tag is not that tag; it leaves a
+       mount anchor until child components render (roadmap 7) -->
+  <nav class="comp"><Link to="/">Home</Link><b>after</b></nav>
+</main>

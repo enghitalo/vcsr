@@ -14,7 +14,7 @@ ships an example under `examples/` whose README shows a screenshot taken by
   import. Fix the unconditional `preventDefault()`. Retire the duplicate ABI
   copies (`examples/counter/wasm/app.js`, `dom.mjs`). Add the example runner
   and `make examples`. Counter README gets a screenshot.
-- [ ] **2. Template language correctness** ★ `examples/template-basics`
+- [x] **2. Template language correctness** ★ `examples/template-basics`
   Whitespace policy, `{{ }}`-aware text scanning, void elements, error on
   content after the root, attribute escaping, closing tags for self-closed
   non-void elements, line:col errors; text mixed with interpolations; one

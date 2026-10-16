@@ -1,0 +1,24 @@
+<!-- A pretty-printed template: indentation between tags is condensed away,
+     so it compiles to the same skeleton as a one-line one. -->
+<article class="card">
+  <h1>Hello, {{ name }}!</h1>
+
+  <label>
+    Your name
+    <input @bind="name" placeholder="type a name">
+  </label>
+
+  <p class="stats">
+    {{ name.len }} characters, a <b>{{ size }}</b> name
+    &mdash; {{ name.len < 6 }} that it's under six.
+  </p>
+
+  <p class="shouts">{{ 'Shouted ${shouts} time' + if shouts == 1 { '' } else { 's' } }}.</p>
+
+  <div class="actions">
+    <button @click="shout">Shout</button>
+    <button @click="reset">Reset</button>
+  </div>
+
+  <footer>&copy; 2026 &middot; costs $0 &middot; 1 &lt; 2</footer>
+</article>

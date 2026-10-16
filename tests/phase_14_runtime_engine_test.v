@@ -9,7 +9,7 @@
 module main
 
 import vcsr { signal }
-import vcsr.runtime { SlotDesc, Template, bind_attr, bind_event, bind_if, bind_list, bind_text, bind_value, to_str }
+import vcsr.runtime { SlotDesc, Template, bind_attr, bind_event, bind_if, bind_if_ctx, bind_list, bind_text, bind_value, to_str }
 
 // The counter, exactly as codegen would emit it: two text slots reading one
 // signal + a click handler that writes it. The full clone → bind → patch loop.
@@ -71,22 +71,50 @@ fn test_attr_binding_follows_signal() {
 	assert dom.html().contains('<span class="off">')
 }
 
-fn test_if_toggles_presence() {
+// @if and @for slots are ANCHORS: an empty comment in the container (what
+// slots/codegen emit, #28). Until roadmap items 4/5 render their rows, the
+// binding keeps its expression live and shows it on the anchor; it never
+// touches an element (#16: a comment has no style or attributes).
+fn test_if_anchor_shows_the_live_condition() {
 	mut show := signal(true)
 	tpl := Template{
-		html:  '<div><p></p></div>'
-		slots: [SlotDesc{ kind: .cond, path: [0] }]
+		html:  '<div><b>x</b><!----></div>'
+		slots: [SlotDesc{ kind: .cond, path: [], anchor: 0 }]
 	}
 	mut ins := tpl.instance()
 	bind_if(mut ins, 0, fn [mut show] () bool {
 		return show.get()
 	})
 	dom := ins.view()
-	assert dom.html().contains('<p>')
+	assert dom.html() == '<div><b>x</b><!--@if true--></div>'
 	show.set(false)
-	assert !dom.html().contains('<p>') // removed from the render
-	show.set(true)
-	assert dom.html().contains('<p>') // and back
+	assert dom.html() == '<div><b>x</b><!--@if false--></div>'
+}
+
+struct Flag {
+mut:
+	on &vcsr.Signal[bool]
+}
+
+fn flag_on(ctx voidptr) bool {
+	f := unsafe { &Flag(ctx) }
+	return f.on.get()
+}
+
+fn test_if_anchor_ctx_binding_matches_the_closure_one() {
+	mut f := Flag{
+		on: signal(false)
+	}
+	tpl := Template{
+		html:  '<p><!----></p>'
+		slots: [SlotDesc{ kind: .cond, path: [], anchor: 0 }]
+	}
+	mut ins := tpl.instance()
+	bind_if_ctx(mut ins, 0, voidptr(&f), flag_on)
+	dom := ins.view()
+	assert dom.html() == '<p><!--@if false--></p>'
+	f.on.set(true)
+	assert dom.html() == '<p><!--@if true--></p>'
 }
 
 fn test_two_way_value_binding() {
@@ -109,20 +137,20 @@ fn test_two_way_value_binding() {
 	assert ins.value_of(0) == 'bob' // ...and the value re-syncs
 }
 
-fn test_list_length_is_reactive() {
+fn test_for_anchor_shows_the_live_count() {
 	mut n := signal(2)
 	tpl := Template{
-		html:  '<ul><li></li></ul>'
-		slots: [SlotDesc{ kind: .list, path: [0] }]
+		html:  '<ul><!----></ul>'
+		slots: [SlotDesc{ kind: .list, path: [], anchor: 0 }]
 	}
 	mut ins := tpl.instance()
 	bind_list(mut ins, 0, fn [mut n] () int {
 		return n.get()
 	})
 	dom := ins.view()
-	assert dom.html().contains('data-count="2"')
+	assert dom.html() == '<ul><!--@for 2--></ul>'
 	n.set(5)
-	assert dom.html().contains('data-count="5"')
+	assert dom.html() == '<ul><!--@for 5--></ul>'
 }
 
 // Text that follows an element must stay after it (ordered children), and a
@@ -171,4 +199,60 @@ fn test_dispose_detaches_slot_effects() {
 	ins.dispose()
 	count.set(3) // detached → the unmounted node must not be patched
 	assert dom.html().contains('<span>2</span>')
+}
+
+// --- the mock parses its skeleton as HTML and serializes like the DOM ---------
+
+// #20: `{{{{` leaves a literal `{{` in the skeleton. That is text to the browser,
+// and to the mock, which parses the skeleton as HTML, not as a template.
+fn test_literal_braces_in_the_skeleton_are_text() {
+	mut x := signal('X')
+	tpl := Template{
+		html:  '<div><p>type {{ to open, {{x}} too</p><b></b></div>'
+		slots: [SlotDesc{ kind: .text, path: [1] }]
+	}
+	mut ins := tpl.instance()
+	bind_text(mut ins, 0, fn [mut x] () string {
+		return x.get()
+	})
+	assert ins.view().html() == '<div><p>type {{ to open, {{x}} too</p><b>X</b></div>'
+}
+
+// #25: html() serializes like the browser's innerHTML. Entities in the skeleton
+// are decoded when it is parsed; text and attribute values are escaped on the
+// way out, so markup in a value or in decoded text never becomes a live tag.
+fn test_html_escapes_text_and_attributes_like_the_dom() {
+	mut v := signal('<b>&"x"</b>')
+	tpl := Template{
+		html:  '<p title="a &amp; &quot;b&quot;">Tom &amp; Jerry &mdash; 1 &lt; 2<span></span><i></i></p>'
+		slots: [SlotDesc{ kind: .text, path: [0] }, SlotDesc{ kind: .attr, path: [1], name: 'title' }]
+	}
+	mut ins := tpl.instance()
+	bind_text(mut ins, 0, fn [mut v] () string {
+		return v.get()
+	})
+	bind_attr(mut ins, 1, 'title', fn [mut v] () string {
+		return v.get()
+	})
+	assert ins.view().html() == '<p title="a &amp; &quot;b&quot;">Tom &amp; Jerry — 1 &lt; 2<span>&lt;b&gt;&amp;"x"&lt;/b&gt;</span><i title="&lt;b&gt;&amp;&quot;x&quot;&lt;/b&gt;"></i></p>'
+	raw := Template{
+		html:  '<div><style>a > b { content: "&amp;" }</style>\u00a0</div>'
+		slots: []
+	}
+	mut rins := raw.instance()
+	assert rins.view().html() == '<div><style>a > b { content: "&amp;" }</style>&nbsp;</div>'
+}
+
+// #33: the mock keeps the skeleton's whitespace as written, as the browser does
+// (no template condensing), e.g. the space a dropped user comment left behind.
+fn test_skeleton_whitespace_is_kept_as_written() {
+	for html in ['<div><span>a</span><span> <b>b</b></span></div>',
+		'<div><b>x</b><span><b>y</b> </span>z</div>', '<p>\n  a  <b>b</b>\n</p>'] {
+		tpl := Template{
+			html:  html
+			slots: []
+		}
+		mut ins := tpl.instance()
+		assert ins.view().html() == html
+	}
 }

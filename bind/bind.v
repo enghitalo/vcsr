@@ -71,7 +71,7 @@ pub fn plan(ct CompiledTemplate) !BindingPlan {
 				bp.bindings << Binding{
 					kind:       .effect
 					slot:       i
-					reads:      free_idents(s.expr)
+					reads:      idents_of(s.text_exprs())
 					writes_dom: .text_content
 				}
 			}
@@ -123,52 +123,36 @@ pub fn plan(ct CompiledTemplate) !BindingPlan {
 	return bp
 }
 
-// free_idents extracts the base free identifiers of an expression, in order of
-// first appearance: member tails (`.x`) are dropped, string literals skipped,
-// numeric literals and the `true`/`false`/`none` keywords excluded.
-//   'count'        -> ['count']
-//   'a + b * 2'    -> ['a', 'b']
-//   'user.name'    -> ['user']
-//   'x != none'    -> ['x']
-// Public so phase 04 can resolve the same candidate set against the struct.
-pub fn free_idents(expr string) []string {
+// idents_of unions the free identifiers of several expressions, in order.
+fn idents_of(exprs []string) []string {
 	mut out := []string{}
-	mut i := 0
-	for i < expr.len {
-		c := expr[i]
-		if c == `'` || c == `"` {
-			q := c
-			i++
-			for i < expr.len && expr[i] != q {
-				i++
+	for e in exprs {
+		for id in free_idents(e) {
+			if id !in out {
+				out << id
 			}
-			if i < expr.len {
-				i++ // closing quote
-			}
-			continue
-		}
-		if is_ident_start(c) {
-			start := i
-			i++
-			for i < expr.len && is_ident_part(expr[i]) {
-				i++
-			}
-			name := expr[start..i]
-			preceded_by_dot := start > 0 && expr[start - 1] == `.`
-			if !preceded_by_dot && name !in ['true', 'false', 'none'] && name !in out {
-				out << name
-			}
-		} else {
-			i++
 		}
 	}
 	return out
 }
 
-fn is_ident_start(c u8) bool {
-	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || c == `_`
-}
-
-fn is_ident_part(c u8) bool {
-	return is_ident_start(c) || (c >= `0` && c <= `9`)
+// free_idents extracts the base free identifiers of an expression, in order of
+// first appearance — the identifiers the component must resolve (signals,
+// fields, methods) or the template must bind (@for loop variables). Member
+// tails (`.x`), literals, V keywords and builtin type names are excluded;
+// identifiers inside `${}` string interpolations are included.
+//   'count'                -> ['count']
+//   'a + b * 2'            -> ['a', 'b']
+//   'user.name'            -> ['user']
+//   'int(x) < 1e5'         -> ['x']
+//   "'hi ${name}' + tail"  -> ['name', 'tail']
+// Public so phase 04 can resolve the same candidate set against the struct.
+pub fn free_idents(expr string) []string {
+	mut out := []string{}
+	for t in tokens(expr) {
+		if t.kind == .ident && t.text !in out {
+			out << t.text
+		}
+	}
+	return out
 }

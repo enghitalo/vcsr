@@ -67,10 +67,12 @@ fn test_skips_leading_comment() {
 	assert tree.root.tag == 'div'
 }
 
-fn test_skips_child_comment() {
+fn test_child_comment_is_kept_as_a_comment_node() {
+	// kept in the AST (so skeleton anchors survive a re-parse); slots drops it
 	tree := parse('<div><!-- note --><span>x</span></div>')
-	assert tree.root.children.len == 1
-	assert tree.root.children[0].tag == 'span'
+	assert tree.root.children.len == 2
+	assert tree.root.children[0].kind == .comment
+	assert tree.root.children[1].tag == 'span'
 }
 
 // --- interpolation ----------------------------------------------------------
@@ -258,4 +260,152 @@ fn test_rejects_empty_template() {
 		return
 	}
 	assert false, 'expected an error for an empty template'
+}
+
+// --- HTML rules: text vs markup, void elements, whitespace, errors ----------
+
+fn test_lt_inside_interpolation_and_bare_lt_are_text() {
+	tree := parse('<p>{{ count < 10 }} and 1 < 2</p>')
+	assert tree.root.children.len == 2
+	assert tree.root.children[0].expr == 'count < 10'
+	assert tree.root.children[1].text == ' and 1 < 2'
+}
+
+fn test_void_elements_need_no_closing_tag() {
+	tree := parse('<form><input @bind="name"><br><img src="a.png"></form>')
+	assert tree.root.children.map(it.tag) == ['input', 'br', 'img']
+	assert tree.root.children[0].binding or { panic('no @bind') }.target_expr == 'name'
+}
+
+fn test_pretty_printing_whitespace_is_condensed_away() {
+	tree := parse('<p>\n    {{ x }}\n</p>')
+	assert tree.root.children.len == 1
+	assert tree.root.children[0].kind == .interpolation
+}
+
+fn test_text_whitespace_runs_collapse_to_one_space() {
+	tree := parse('<p>Hello\n      {{ name }}  !</p>')
+	assert tree.root.children[0].text == 'Hello '
+	assert tree.root.children[2].text == ' !'
+}
+
+fn test_unquoted_attribute_value_may_contain_slashes() {
+	tree := parse('<a href=/docs/intro>x</a>')
+	assert tree.root.attr('href') or { '' } == '/docs/intro'
+}
+
+fn test_for_accepts_any_whitespace_around_in() {
+	tree := parse('<ul><li @for="item\tin  items">x</li></ul>')
+	e := tree.root.children[0].each or { panic('no @for') }
+	assert e.item_name == 'item' && e.source_expr == 'items'
+}
+
+fn expect_error(src string, wants ...string) {
+	parser.parse_template(src) or {
+		for w in wants {
+			assert err.msg().contains(w), 'error "${err.msg()}" should mention "${w}"'
+		}
+		return
+	}
+	assert false, 'expected "${src}" to fail'
+}
+
+fn test_errors_report_line_and_column() {
+	expect_error('<div>\n  <p></span>\n</div>', 'mismatched', 'line 2, col 6')
+}
+
+fn test_content_after_the_root_is_an_error() {
+	expect_error('<div></div><p>lost</p>', 'after the root')
+}
+
+fn test_unterminated_interpolation_is_an_error() {
+	expect_error('<p>{{ x </p>', 'unterminated {{')
+}
+
+fn test_handler_and_directive_values_are_required() {
+	expect_error('<button @click>x</button>', '@click', 'handler')
+	expect_error('<p @if="">x</p>', '@if')
+	expect_error('<p class:="on">x</p>', 'class:')
+	expect_error('<li @for="(i, x) in xs">x</li>', '@for')
+}
+
+// --- review of #15: regressions (#18 #19 #26 #27) ----------------------------
+
+fn test_components_named_like_html_tags_are_still_components() {
+	// #18: void, raw-text and <pre> rules are HTML's; a PascalCase tag is a
+	// component whatever its name, so it has children and a closing tag
+	for name in ['Link', 'Input', 'Img', 'Meta', 'Source', 'Br', 'Wbr'] {
+		tree := parse('<nav><${name} to="/">Home <b>{{ x }}</b></${name}></nav>')
+		c := tree.root.children[0]
+		assert c.kind == .component && c.tag == name
+		assert c.children.len == 2 && c.children[1].tag == 'b'
+	}
+	style := parse('<div><Style :theme="t"><b>{{ x }}</b></Style></div>').root.children[0]
+	assert style.children.len == 1 && style.children[0].tag == 'b'
+	assert style.children[0].children[0].kind == .interpolation
+	pre := parse('<div><Pre>\n   <b>{{ x }}</b>\n</Pre></div>').root.children[0]
+	assert pre.children.len == 1 && pre.children[0].tag == 'b' // condensed like any element
+	assert !parser.is_void('Link') && !parser.is_void('Input')
+	assert parser.is_void('input') && parser.is_void('br')
+}
+
+fn test_abrupt_empty_comments_are_empty_comments() {
+	// #19: `<!-->` and `<!--->` are empty comments (HTML), not a crash
+	for src in ['<div><!-->x</div>', '<div><!--->x</div>', '<div><!---->x</div>'] {
+		tree := parse(src)
+		assert tree.root.children.len == 2, src
+		assert tree.root.children[0].kind == .comment && tree.root.children[0].text == ''
+		assert tree.root.children[1].text == 'x'
+	}
+	assert parse('<!--><div><!---->y</div>').root.tag == 'div'
+	assert parse('<div><!-- a -- b -->z</div>').root.children[0].text == ' a -- b '
+}
+
+fn test_for_source_expression_is_kept_as_written() {
+	// #26: only the split around `in` is whitespace-tolerant, not the source
+	e := parse('<ul><li @for="w in line.split(\'  \')">{{ w }}</li></ul>').root.children[0].each or {
+		panic('no @for')
+	}
+	assert e.item_name == 'w' && e.source_expr == "line.split('  ')"
+	t := parse('<ul><li @for="w\tin\t[\'a  b\',\t\'c\']">x</li></ul>').root.children[0].each or {
+		panic('no @for')
+	}
+	assert t.item_name == 'w' && t.source_expr == "['a  b',\t'c']"
+	for bad in ['w in', 'in xs', 'w xs', '1w in xs', 'w inxs'] {
+		expect_error('<li @for="${bad}">x</li>', '@for')
+	}
+}
+
+fn test_pre_textarea_listing_drop_one_leading_newline() {
+	// #27: the HTML parser ignores a newline right after these start tags
+	assert parse('<pre>\nstatic</pre>').root.children[0].text == 'static'
+	assert parse('<pre>\n\nkept</pre>').root.children[0].text == '\nkept' // only one
+	assert parse('<listing>\nl</listing>').root.children[0].text == 'l'
+	c := parse('<pre>\n{{ code }}</pre>').root.children
+	assert c.len == 1 && c[0].kind == .interpolation
+	t := parse('<div><textarea>\n{{ v }}</textarea></div>').root.children[0].children
+	assert t.len == 1 && t[0].kind == .interpolation
+	assert parse('<pre> \nx</pre>').root.children[0].text == ' \nx' // not a leading newline
+}
+
+fn test_newlines_are_normalized_to_lf() {
+	// #27: CRLF and lone CR become LF, as in the HTML input stream
+	c := parse('<pre>l1\r\n{{ code }}\r\nl3\rl4</pre>').root.children
+	assert c.len == 3 && c[0].text == 'l1\n' && c[2].text == '\nl3\nl4'
+	expect_error('<div>\r\n  <p></span>\r\n</div>', 'line 2, col 6')
+}
+
+// --- parse_html: a compiled skeleton, read the way the browser reads it -------
+
+fn test_parse_html_reads_a_skeleton_like_the_browser() {
+	t := parser.parse_html('<p title="a &amp; b &copy=x">{{ x }} &copy 2026 &lt;b&gt;<!--@if true--><b> </b></p>') or {
+		panic(err)
+	}
+	assert t.root.attrs[0].value == 'a & b &copy=x' // attribute rules: `&copy=` stays
+	assert t.root.children.map(it.kind) == [NodeKind.text, .comment, .element]
+	assert t.root.children[0].text == '{{ x }} © 2026 <b>' // no interpolation; decoded
+	assert t.root.children[1].text == '@if true'
+	assert t.root.children[2].children[0].text == ' ' // whitespace as written
+	ta := parser.parse_html('<div><textarea>\n<b>&amp;</b></textarea></div>') or { panic(err) }
+	assert ta.root.children[0].children[0].text == '<b>&</b>' // RCDATA: no tags
 }
