@@ -26,6 +26,8 @@ dist/
 # `vcsr wasm` outputs next to each example's committed app.js/index.html
 examples/*/wasm/vcsr_host.js
 examples/*/wasm/core.c
+# a testdata fixture's whole wasm/ is generated (vcsr's default page)
+testdata/*/wasm/
 
 # built vcsr CLI binary
 cmd/vcsr/vcsr
