@@ -35,7 +35,15 @@ const vcsr_host_js = $embed_file('../../runtime/vcsr_host.js')
 const wasm_app_js = $embed_file('templates/wasm_app.js')
 const wasm_index_html = $embed_file('templates/wasm_index.html')
 
+// V v3 retries a failed compile with its old 0.5.2 compiler (the "v1
+// fallback"). vcsr's recipes target v3, so that retry would only hide v3's real
+// error behind a build from another compiler (#35): turn it off for every V
+// this process runs, and treat its message as a failure if it shows up anyway.
+const v_no_fallback_env = 'V_MACOS_V3_NO_FALLBACK'
+const v_fallback_marker = 'retrying with `'
+
 fn main() {
+	os.setenv(v_no_fallback_env, '1', true)
 	args := os.args#[1..]
 	if args.len == 0 {
 		usage()
@@ -163,16 +171,21 @@ fn do_wasm(rest []string) ! {
 
 	// 1) V → C, host-owned-DOM backend (-d wasm_browser); strip Linux-only bits.
 	//    -arch wasm32: 32-bit int/pointers, and no x86 inline asm (math.bits).
-	run_step('V→C',
-		'${os.quoted_path(@VEXE)} -arch wasm32 -d wasm_browser -d no_backtrace -d no_getpid -d no_gettid -d no_segfault_handler -enable-globals -cc clang -gc none -o ${os.quoted_path(cfile)} ${os.quoted_path(src)}')!
+	run_step('V→C', [@VEXE, '-arch', 'wasm32', '-d', 'wasm_browser', '-d', 'no_backtrace', '-d',
+		'no_getpid', '-d', 'no_gettid', '-d', 'no_segfault_handler', '-enable-globals', '-cc',
+		'clang', '-gc', 'none', '-o', cfile, src])!
 
 	// 2) C → wasm, reactor model; -I runtime for vcsr_host.h, -I wasi_compat for
 	//    the POSIX headers V's preamble includes but WASI lacks. Static data and
 	//    the stack start at 64 KiB because V's vmemcpy & co. treat any pointer
 	//    <= 0xFFFF as null (see runtime/wasi_compat/README.md).
 	compat_inc := os.join_path(runtime_inc, 'wasi_compat')
-	run_step('C→wasm',
-		'${os.quoted_path(clang)} --sysroot=${os.quoted_path(sysroot)} --target=wasm32-wasip1 -mexec-model=reactor -Wl,--no-entry -Wl,--export-all -Wl,--strip-all -Wl,--no-stack-first -Wl,--global-base=65536 -I ${os.quoted_path(compat_inc)} -I ${os.quoted_path(runtime_inc)} -D_WASI_EMULATED_MMAN -lwasi-emulated-mman -D_WASI_EMULATED_SIGNAL -lwasi-emulated-signal -D_WASI_EMULATED_PROCESS_CLOCKS -lwasi-emulated-process-clocks -O3 -o ${os.quoted_path(wasmfile)} ${os.quoted_path(cfile)}')!
+	run_step('C→wasm', [clang, '--sysroot=${sysroot}', '--target=wasm32-wasip1',
+		'-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-all', '-Wl,--strip-all',
+		'-Wl,--no-stack-first', '-Wl,--global-base=65536', '-I', compat_inc, '-I', runtime_inc,
+		'-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman', '-D_WASI_EMULATED_SIGNAL',
+		'-lwasi-emulated-signal', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks',
+		'-O3', '-o', wasmfile, cfile])!
 
 	os.rm(cfile) or {}
 	println('✓ ${wasmfile}  (${os.file_size(wasmfile)} B)')
@@ -197,10 +210,12 @@ fn do_wasm(rest []string) ! {
 	println('  run it:  vcsr serve ${out}  (sets Content-Type: application/wasm)')
 }
 
-// run_step executes one external build command, surfacing its output on failure.
-fn run_step(label string, cmd string) ! {
-	res := os.execute(cmd)
-	if res.exit_code != 0 {
+// run_step runs one external build command (an argument array, no shell),
+// surfacing its output on failure. A build V handed to its 0.5.2 fallback is a
+// failure too: it is not v3's output (see v_no_fallback_env).
+fn run_step(label string, args []string) ! {
+	res := os.exec(args)
+	if res.exit_code != 0 || res.output.contains(v_fallback_marker) {
 		return error('wasm: ${label} step failed:\n${res.output}')
 	}
 }
@@ -221,14 +236,14 @@ fn do_update(rest []string) ! {
 		if !os.is_dir(os.join_path(repo, '.git')) {
 			return error('update: vcsr source repo not found at ${repo}\n  clone git@github.com:enghitalo/vcsr.git there, or pass --rebuild to rebuild the current source')
 		}
-		branch := git_out(repo, 'rev-parse --abbrev-ref HEAD')
-		before := git_out(repo, 'rev-parse --short HEAD')
+		branch := git_out(repo, 'rev-parse', '--abbrev-ref', 'HEAD')
+		before := git_out(repo, 'rev-parse', '--short', 'HEAD')
 		println('vcsr: fetching origin/${branch} …')
-		pull := os.execute('git -C ${os.quoted_path(repo)} pull --ff-only origin ${branch}')
+		pull := os.exec(['git', '-C', repo, 'pull', '--ff-only', 'origin', branch])
 		if pull.exit_code != 0 {
 			return error('update: git pull --ff-only failed:\n${pull.output.trim_space()}\n  reconcile local changes (or push them), or pass --rebuild to just rebuild the current source')
 		}
-		after := git_out(repo, 'rev-parse --short HEAD')
+		after := git_out(repo, 'rev-parse', '--short', 'HEAD')
 		if before == after {
 			println('  already on the latest origin/${branch} (${after}); rebuilding to refresh the binary…')
 		} else {
@@ -241,13 +256,12 @@ fn do_update(rest []string) ! {
 	tmp := exe + '.new'
 	cmddir := os.join_path(repo, 'cmd', 'vcsr')
 	println('vcsr: building ${exe} …')
-	run_step('build',
-		'${os.quoted_path(@VEXE)} -prod -o ${os.quoted_path(tmp)} ${os.quoted_path(cmddir)}')!
+	run_step('build', [@VEXE, '-prod', '-o', tmp, cmddir])!
 	os.mv(tmp, exe) or {
 		os.rm(tmp) or {}
 		return error('update: built ok but failed to install to ${exe}: ${err.msg()}')
 	}
-	println('✓ vcsr ${version} installed at ${exe}  (${git_out(repo, 'rev-parse --short HEAD')})')
+	println('✓ vcsr ${version} installed at ${exe}  (${git_out(repo, 'rev-parse', '--short', 'HEAD')})')
 }
 
 // repo_root is the vcsr source tree this binary was built from (cmd/vcsr/vcsr.v
@@ -257,8 +271,10 @@ fn repo_root() string {
 }
 
 // git_out runs `git -C repo <args>` and returns trimmed stdout (or '?' on error).
-fn git_out(repo string, args string) string {
-	r := os.execute('git -C ${os.quoted_path(repo)} ${args}')
+fn git_out(repo string, args ...string) string {
+	mut argv := ['git', '-C', repo]
+	argv << args
+	r := os.exec(argv)
 	return if r.exit_code == 0 { r.output.trim_space() } else { '?' }
 }
 
