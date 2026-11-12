@@ -296,3 +296,8 @@ fn test_handler_value_is_trimmed() {
 	)!
 	assert c.codegen()!.source.contains('c.inc()')
 }
+
+fn test_a_signal_passed_as_mut_or_ref_stays_the_signal() {
+	src := greet_src('<div><button @click="label(mut n)">a</button><i @click="label(&name)">b</i></div>')
+	assert src.contains('g.label(mut g.n)') && src.contains('g.label(&g.name)')
+}

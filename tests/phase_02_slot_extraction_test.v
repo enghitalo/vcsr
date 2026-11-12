@@ -317,3 +317,8 @@ fn test_bound_attribute_names_fold_like_setattribute() {
 fn test_an_authored_newline_written_as_a_reference_survives() {
 	assert compile('<div><pre>&#10;&#10;x</pre></div>').html == '<div><pre>\n&#10;x</pre></div>'
 }
+
+fn test_raw_text_keeps_its_braces() {
+	css := '@media (x){@supports (y){.a{.b{color:red}}}}'
+	assert compile('<div><style>${css}</style></div>').html == '<div><style>${css}</style></div>'
+}

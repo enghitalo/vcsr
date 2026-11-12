@@ -355,8 +355,8 @@ fn (c &Component) text_value(s slots.SlotDesc) string {
 
 // qualify rewrites a template expression's free identifiers into receiver-scoped
 // V. A signal field is the Signal (`recv.name`) only where its own API follows
-// (`name.set(…)`, `.update`, `.get`, `.peek`) and its value (`recv.name.get()`)
-// everywhere else. A computed method is called in a value context
+// (`name.set(…)`, `.update`, `.get`, `.peek`) or it is passed as `mut name` or
+// `&name`, and its value (`recv.name.get()`) everywhere else. A computed method is called in a value context
 // (`{{ doubled }}` → `recv.doubled()`) and stays a method value in a handler;
 // inside `${}` it is always a value. A plain field becomes `recv.name`, and
 // anything else (a @for loop variable, an external) is left as is. It works on
@@ -381,11 +381,8 @@ fn (c &Component) qualify(expr string, value_ctx bool) string {
 		}
 		name := t.text
 		if c.is_signal(name) {
-			out.write_string('${recv}.${name}' + if next_is_signal_api(toks, i) {
-				''
-			} else {
-				'.get()'
-			})
+			signal_itself := next_is_signal_api(toks, i) || prev_is_mut_or_ref(toks, i)
+			out.write_string('${recv}.${name}' + if signal_itself { '' } else { '.get()' })
 		} else if c.has_method(name) && !c.is_field(name) {
 			if (value_ctx || interp > 0) && !bind.next_is_call(toks, i) {
 				out.write_string('${recv}.${name}()')
@@ -416,6 +413,16 @@ fn next_is_signal_api(toks []bind.Token, i int) bool {
 		k++
 	}
 	return k < toks.len && toks[k].kind == .member && toks[k].text in ['get', 'peek', 'set', 'update']
+}
+
+// prev_is_mut_or_ref reports whether toks[i] is passed as `mut x` or `&x`: the
+// Signal itself goes to a method that takes one.
+fn prev_is_mut_or_ref(toks []bind.Token, i int) bool {
+	mut k := i - 1
+	for k >= 0 && toks[k].kind == .space {
+		k--
+	}
+	return k >= 0 && (toks[k].text == 'mut' || toks[k].text == '&')
 }
 
 // list_count renders the item count of a @for source as V. A range (`0..n`) has

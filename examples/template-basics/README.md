@@ -26,17 +26,18 @@ Type a name and the heading, the character count and the size label all update.
 | Template | What vcsr does |
 |---|---|
 | `<h1>Hello, {{ name }}!</h1>` | text + interpolations in one element → **one** text slot, the concatenation |
-| `{{ name.len }} characters, a <b>{{ size }}</b> name` | an interpolation beside element children → its own text node at an `<!---->` anchor |
-| `{{ name.len < 6 }}` | `<` inside `{{ }}` is part of the expression, not a tag |
+| `{{ name.runes().len }} characters, a <b>{{ size }}</b> name` | an interpolation beside element children → its own text node at an `<!---->` anchor |
+| `{{ name.runes().len < 6 }}` | `<` inside `{{ }}` is part of the expression, not a tag |
 | `{{ 'Shouted ${shouts} time' + if shouts == 1 { '' } else { 's' } }}` | any V expression: the signal inside `${}` is read reactively |
 | `<input @bind="name">` | a void element; `@bind` keeps the input and the `name` signal in sync |
-| `&mdash;`, `&copy;`, `&lt;`, `$0` | entities decode (also inside text slots); a literal `$` is fine |
+| `&mdash;`, `&copy;`, `&lt;`, `$0` | every HTML5 character reference decodes, also inside text slots; a literal `$` is fine |
 | indentation, line breaks | condensed like Vue does: the skeleton is the same as for a one-line template |
 
 The whitespace rule: a whitespace-only text node is dropped when it is first or
 last in its element, or sits between two tags and contains a line break;
 otherwise whitespace runs collapse to one space. `<pre>` and `<textarea>` keep
-theirs verbatim.
+theirs verbatim, except that, as in HTML, a newline right after the start tag
+is dropped.
 
 ## Files
 

@@ -395,14 +395,15 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 
 // read_text reads template text from pos up to `to` (or, when `to` < 0, up to
 // the next markup), adding literal text and `{{ expr }}` interpolation nodes to
-// `parent`. `{{{{` and `}}}}` are literal braces; anything inside `{{ }}`,
-// even a `<`, belongs to the expression.
+// `parent`. `{{{{` and `}}}}` are literal braces (except in a raw-text body,
+// code whose braces are kept as written); anything inside `{{ }}`, even a `<`,
+// belongs to the expression.
 fn (mut p Parser) read_text(mut parent ast.Node, to int) ! {
 	limit := if to >= 0 { to } else { p.src.len }
 	mut lit := strings.new_builder(32)
 	mut seg := p.pos
 	for p.pos < limit {
-		if p.has('{{{{') || p.has('}}}}') {
+		if !parent.raw_text && (p.has('{{{{') || p.has('}}}}')) {
 			lit.write_string(p.src[seg..p.pos])
 			lit.write_string(p.src[p.pos..p.pos + 2])
 			p.pos += 4

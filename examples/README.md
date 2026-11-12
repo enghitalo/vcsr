@@ -16,6 +16,10 @@ make examples                      # build all of them and check each in Chrome
 | [serve-with-vanilla](serve-with-vanilla) | serving a built `dist/` with the [vanilla](https://github.com/enghitalo/vanilla) HTTP server via its `static_assets` module | ✅ (serves `testdata/fixture-app`) |
 | [spa](spa) | the *target* authoring experience: router + code splitting, a shared component, a store, lists, async fetch | ❌ illustrative — uses features still on the [roadmap](../docs/ROADMAP.md) |
 
+Edge cases that aren't worth an example live in
+[`testdata/template-edges`](../testdata/template-edges): `make test` and
+`make examples` check it natively and in Chrome too.
+
 New examples land with the roadmap features they demonstrate, each with a
 screenshot in its README taken by
 [`tools/browser-smoke/example.mjs`](../tools/browser-smoke/example.mjs).
