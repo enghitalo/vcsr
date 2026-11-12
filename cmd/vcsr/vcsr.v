@@ -181,9 +181,9 @@ fn do_wasm(rest []string) ! {
 	//    <= 0xFFFF as null (see runtime/wasi_compat/README.md).
 	compat_inc := os.join_path(runtime_inc, 'wasi_compat')
 	run_step('C→wasm', [clang, '--sysroot=${sysroot}', '--target=wasm32-wasip1',
-		'-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-all', '-Wl,--strip-all',
-		'-Wl,--no-stack-first', '-Wl,--global-base=65536', '-I', compat_inc, '-I', runtime_inc,
-		'-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman', '-D_WASI_EMULATED_SIGNAL',
+		'-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-all', '-Wl,--export-table',
+		'-Wl,--strip-all', '-Wl,--no-stack-first', '-Wl,--global-base=65536', '-I', compat_inc,
+		'-I', runtime_inc, '-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman', '-D_WASI_EMULATED_SIGNAL',
 		'-lwasi-emulated-signal', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks',
 		'-O3', '-o', wasmfile, cfile])!
 

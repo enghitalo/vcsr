@@ -7,6 +7,7 @@ pub enum NodeKind {
 	text          // literal text
 	interpolation // {{ expr }}
 	component     // a PascalCase tag, e.g. <Button>
+	comment       // <!-- … --> (kept so skeleton anchors survive a re-parse; slots drops user comments)
 }
 
 // A static attribute: name="value".
@@ -72,7 +73,7 @@ pub struct Node {
 pub mut:
 	kind           NodeKind
 	tag            string         // element/component tag name
-	text           string         // for .text nodes
+	text           string         // for .text and .comment nodes
 	expr           string         // for .interpolation nodes
 	attrs          []Attr         // static attributes (elements)
 	attr_bindings  []AttrBinding  // :name="expr" (elements)
@@ -84,6 +85,8 @@ pub mut:
 	props          []Prop         // props (components)
 	children       []Node
 	self_closing   bool
+	raw_text       bool // an element whose body HTML reads verbatim (script, style, …): no tags, no references
+	foreign        bool // <svg>/<math> or inside one: HTML's case folding and raw-text rules don't apply
 }
 
 // attr returns a static attribute's value, or an error if absent.

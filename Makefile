@@ -3,8 +3,8 @@
 #   make update             git pull --ff-only, then reinstall
 #   make build              build the binary into cmd/vcsr/vcsr
 #   make test               regenerate *.gen.v, then run the native test suite
-#   make examples           build every wasm example and check it in Chrome
-#   make screenshots        same, refreshing each example's screenshot.png
+#   make examples           build every wasm example (+ testdata fixture) and check it in Chrome
+#   make screenshots        same for the examples, refreshing each screenshot.png
 PREFIX ?= $(HOME)/.local
 BIN     := $(PREFIX)/bin/vcsr
 V       ?= v
@@ -28,8 +28,11 @@ fmt: ## format tracked V sources
 fmt-verify: ## verify tracked V sources are formatted
 	$(V) fmt -verify $(FMT_FILES)
 
-# examples that build to wasm: those with a browser entry in src/
+# examples that build to wasm: those with a browser entry in src/; testdata
+# fixtures built the same way are checked in Chrome too, without a screenshot
 WASM_EXAMPLES := $(patsubst %/src/entry_d_wasm_browser.v,%,$(wildcard examples/*/src/entry_d_wasm_browser.v))
+WASM_FIXTURES := $(patsubst %/src/entry_d_wasm_browser.v,%,$(wildcard testdata/*/src/entry_d_wasm_browser.v))
+WASM_APPS     := $(WASM_EXAMPLES) $(WASM_FIXTURES)
 SMOKE := tools/browser-smoke
 
 build: ## build the vcsr binary into cmd/vcsr/vcsr
@@ -44,10 +47,10 @@ update: ## fast-forward to origin, then rebuild + install
 	git pull --ff-only
 	$(MAKE) install
 
-test: build ## regenerate *.gen.v, then run the native test suite (on V v3 only)
-	./cmd/vcsr/vcsr gen examples/counter/src
+test: build ## regenerate *.gen.v, then run the native test suite + every wasm app's (on V v3 only)
+	@set -e; for ex in $(WASM_APPS); do ./cmd/vcsr/vcsr gen $$ex/src; done
 	@echo "$$($(V) version), fallback to 0.5.2 disabled (V_MACOS_V3_NO_FALLBACK=1)"
-	$(V) -enable-globals test tests/ examples/counter/src/ 2>&1 | tee $(VTEST_LOG)
+	$(V) -enable-globals test tests/ $(addsuffix /src/,$(WASM_APPS)) 2>&1 | tee $(VTEST_LOG)
 	@! grep -n 'retrying with' $(VTEST_LOG) || { echo 'make test: V fell back to its 0.5.2 compiler (#35)'; exit 1; }
 
 browser-deps: $(SMOKE)/node_modules ## install Playwright (drives the installed Chrome)
@@ -55,8 +58,8 @@ $(SMOKE)/node_modules: $(SMOKE)/package-lock.json
 	cd $(SMOKE) && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
 	@touch $@
 
-examples: build browser-deps ## build every wasm example (needs wasi-sdk) and check it in Chrome
-	@set -e; for ex in $(WASM_EXAMPLES); do ./cmd/vcsr/vcsr wasm $$ex/src; node $(SMOKE)/example.mjs $$ex --no-shot; done
+examples: build browser-deps ## build every wasm example + testdata fixture (needs wasi-sdk) and check it in Chrome
+	@set -e; for ex in $(WASM_APPS); do ./cmd/vcsr/vcsr wasm $$ex/src; node $(SMOKE)/example.mjs $$ex --no-shot; done
 
 screenshots: build browser-deps ## same as examples, refreshing each examples/*/screenshot.png
 	@set -e; for ex in $(WASM_EXAMPLES); do ./cmd/vcsr/vcsr wasm $$ex/src; node $(SMOKE)/example.mjs $$ex; done

@@ -148,3 +148,51 @@ fn test_plan_uses_helper() {
 	assert p.uses('count')
 	assert !p.uses('nope')
 }
+
+// --- the shared expression lexer (bind.tokens) --------------------------------
+
+fn test_lexer_is_lossless() {
+	for e in ['a + b', "'it\\'s \${x}' + y", 'int(n) < 1e5 && m.len > 0x_ff', '`c` == r', '0..n'] {
+		assert bind.tokens(e).map(it.text).join('') == e
+	}
+}
+
+fn test_free_idents_skips_literals_keywords_and_members() {
+	assert bind.free_idents('count < 10') == ['count']
+	assert bind.free_idents('1e5 + 0xff + 1_000 + 3.14 + 2e-3') == []
+	assert bind.free_idents('int(x) + i64(y)') == ['x', 'y']
+	assert bind.free_idents('if on { a } else { b }') == ['on', 'a', 'b']
+	assert bind.free_idents('item.name in names') == ['item', 'names']
+	assert bind.free_idents('items.filter(it.done).len') == ['items']
+	assert bind.free_idents('0..n') == ['n']
+	assert bind.free_idents('`c` == r') == ['r']
+}
+
+fn test_free_idents_sees_inside_string_interpolation_and_past_escapes() {
+	assert bind.free_idents("'it\\'s' + w") == ['w']
+	assert bind.free_idents("'Hi \${name}, you have \${count + 1}' + tail") == ['name', 'count',
+		'tail']
+	assert bind.free_idents("'\${user.name}'") == ['user']
+}
+
+// --- review of #15: regressions (#23 #29) ------------------------------------
+
+fn test_format_specifiers_in_interpolations_are_not_identifiers() {
+	// #23: in `${price:.2f}` everything after the first top-level `:` is V's
+	// format spec, not code
+	assert bind.free_idents("'\${price:.2f}'") == ['price']
+	assert bind.free_idents("'\${n:05d}|\${n:x}|\${label:-5s}|\${n:8}'") == ['n', 'label']
+	assert bind.free_idents("'\${m['a:b']:5} \${f(v):x}'") == ['m', 'f', 'v']
+	spec := bind.tokens("'\${n:x}'").filter(it.kind == .str).map(it.text)
+	assert spec == ["'", ':x', "'"]
+	for e in ["'\${price:.2f}'", "'\${m['a:b']:5}'"] {
+		assert bind.tokens(e).map(it.text).join('') == e // still lossless
+	}
+}
+
+fn test_rune_literals_inside_interpolations_do_not_unbalance_braces() {
+	// #29: a `{` or quote rune inside `${}` must not move the closing `}`
+	assert bind.free_idents("'\${`{`} name: \${name}'") == ['name']
+	assert bind.free_idents("'\${`'`} and \${b}'") == ['b']
+	assert bind.free_idents("'\${`\\``} or \${c}'") == ['c']
+}

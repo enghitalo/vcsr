@@ -102,7 +102,7 @@ fn test_generated_code_imports_only_runtime() {
 fn test_generated_view_embeds_static_skeleton() {
 	src := counter().codegen()!.source
 	// the static HTML skeleton is embedded as a plain string constant
-	assert src.contains("'<main class=\"counter\"><h1></h1><button>+1</button></main>'")
+	assert src.contains('\'<main class="counter"><h1></h1><button>+1</button></main>\'')
 }
 
 fn test_style_is_scoped_in_generated_code() {
@@ -131,4 +131,173 @@ fn test_shared_component_is_hoisted_to_core() {
 fn test_single_route_component_stays_local() {
 	d := component.decide_hoist(name: 'ReportRow', used_by_routes: ['/reports'])
 	assert d == HoistDecision.route_local
+}
+
+// --- codegen for text parts, the shared lexer, and anchors -------------------
+
+const greet_v = '
+@[component]
+struct Greet {
+mut:
+	name vcsr.Signal[string] = signal("V")
+	n    vcsr.Signal[int] = signal(1)
+}
+fn (mut g Greet) label() string { return "x" }
+'
+
+fn greet_src(html string) string {
+	c := analyze(v: greet_v, html: html) or { panic(err) }
+	return c.codegen() or { panic(err) }.source
+}
+
+fn test_codegen_concatenates_text_parts() {
+	src := greet_src('<p>Hello {{ name }}, n={{ n }}!</p>')
+	assert src.contains("return 'Hello ' + runtime.to_str(g.name.get()) + ', n=' + runtime.to_str(g.n.get()) + '!'")
+}
+
+fn test_codegen_qualifies_inside_string_interpolation_and_skips_keywords() {
+	src := greet_src("<p>{{ 'hi \${name} \${label}' }} {{ int(n) < 10 }}</p>")
+	assert src.contains("runtime.to_str('hi \${g.name.get()} \${g.label()}')")
+	assert src.contains('runtime.to_str(int(g.n.get()) < 10)')
+}
+
+fn test_codegen_escapes_dollar_in_literal_text() {
+	src := greet_src('<p>Cost: $5 for {{ name }}</p>')
+	assert src.contains("'Cost: \\$5 for '")
+}
+
+fn test_codegen_emits_anchors_for_text_beside_elements() {
+	src := greet_src('<p>{{ name }} <b>!</b></p>')
+	assert src.contains("html:  '<p><!----> <b>!</b></p>'")
+	assert src.contains('runtime.SlotDesc{ kind: .text, path: []int{}, anchor: 0 }')
+}
+
+fn test_compiles_with_stock_v_ignores_interpolation_and_escaped_dollar() {
+	c := analyze(v: greet_v, html: "<p>Cost: $5 {{ 'x\${name}' }}</p>") or { panic(err) }
+	assert c.codegen()!.compiles_with_stock_v
+}
+
+// --- review of #15: regressions (#18 #22 #23 #24 #30) ------------------------
+
+const kw_v = '
+@[component]
+struct Field {
+mut:
+	type  string = "text"
+	it    int    = 7
+	items vcsr.Signal[[]int] = signal([1, 2])
+}
+'
+
+fn test_fields_named_like_soft_keywords_are_qualified() {
+	// #22: V accepts `type`, `it`, … as field names; only where V reads them
+	// as syntax (a cast, `it` inside filter/map/…) do they stay bare
+	c := analyze(
+		v:    kw_v
+		html: '<div><input :type="type"><p>{{ it }} {{ items.filter(it > 1).len }} {{ int(it) }}</p></div>'
+	) or { panic(err) }
+	src := c.codegen()!.source
+	assert src.contains('return runtime.to_str(f.type)')
+	assert src.contains('runtime.to_str(f.it) + ')
+	assert src.contains('runtime.to_str(f.items.get().filter(it > 1).len)')
+	assert src.contains('runtime.to_str(int(f.it))')
+}
+
+fn test_format_specifiers_are_left_alone_by_codegen() {
+	// #23: `:.2f` is not a reference (and not rewritten when a field shares its letter)
+	src := analyze(
+		v:    '@[component]\nstruct Cart {\nmut:\n\tprice vcsr.Signal[f64] = signal(1.5)\n\tf int\n\tx int\n}'
+		html: "<p>{{ '\${price:.2f} \${x:x}' }}</p>"
+	)!.codegen()!.source
+	assert src.contains("runtime.to_str('\${c.price.get():.2f} \${c.x:x}')")
+}
+
+fn test_signals_interpolated_in_a_handler_are_read() {
+	// #24: inside `${}` a signal is always its value, even in an event handler
+	src := greet_src('<button @click="name.set(\'Hello \${name} (\${n + 1})!\')">x</button>')
+	assert src.contains("g.name.set('Hello \${g.name.get()} (\${g.n.get() + 1})!')")
+}
+
+fn test_literal_dollar_words_in_user_strings_still_compile_with_stock_v() {
+	// #30: `$USD` inside a string literal is text, not a comptime builtin
+	for html in ["<p>{{ 'Price: \$USD' }}</p>", '<p :title="\'hi \$name\'">{{ name }}</p>'] {
+		c := analyze(v: greet_v, html: html) or { panic(err) }
+		assert c.codegen()!.compiles_with_stock_v, html
+	}
+}
+
+fn test_no_component_tag_survives_in_the_skeleton() {
+	// the COMPONENTS.md invariant (#18): the browser never sees `<Button>`
+	c := analyze(
+		v:    '@[component]\npub struct Page { vcsr.Component }'
+		html: '<main><Link to="/">Home</Link><Button :label="ok" @click="noop" /><p>x</p></main>'
+	)!
+	assert c.tmpl.html == '<main><!----><!----><p>x</p></main>'
+	assert c.children == ['Link', 'Button']
+}
+
+// --- second review of #15 -------------------------------------------------------
+
+fn test_a_signal_is_read_unless_its_own_api_follows() {
+	// an explicit .get() is not doubled; a handler argument is the value; the
+	// signal stays a Signal before .set/.update/.get/.peek
+	src := greet_src('<div><p>{{ name.get() }}</p><button @click="name.set(\'Hi \${name.get()}, \${n}!\')">a</button><i @click="name.set(label())">b</i></div>')
+	assert src.contains('return runtime.to_str(g.name.get())')
+	assert src.contains("g.name.set('Hi \${g.name.get()}, \${g.n.get()}!')")
+	assert src.contains('g.name.set(g.label())')
+	assert !src.contains('.get().get()')
+	bind_src := greet_src('<input @bind="name">')
+	assert bind_src.contains('g.name.set(v)')
+}
+
+const kw_member_v = '
+@[component]
+struct Nav {
+mut:
+	match vcsr.Signal[string] = signal("final")
+	module string = "core"
+}
+fn (mut n Nav) go(p string) {}
+'
+
+fn test_members_named_like_hard_keywords_are_qualified() {
+	src := analyze(
+		v:    kw_member_v
+		html: '<div><p :title="module">{{ match }}</p><button @click="go(\'/about\')">x</button></div>'
+	)!.codegen()!.source
+	assert src.contains('runtime.to_str(n.module)')
+	assert src.contains('runtime.to_str(n.match.get())')
+	assert src.contains("n.go('/about')")
+}
+
+fn test_unknown_type_or_it_reference_is_a_vcsr_error() {
+	for html in ['<p :title="type">x</p>', '<p>{{ it }}</p>'] {
+		analyze(v: greet_v, html: html) or {
+			assert err.msg().contains('unknown reference'), err.msg()
+			continue
+		}
+		assert false, 'expected an error for ${html}'
+	}
+	// `it` inside filter/map is V's, not a reference
+	analyze(v: greet_v, html: '<p>{{ [1, 2].filter(it > n).len }}</p>')!
+}
+
+fn test_for_count_is_parenthesized_and_handles_ranges() {
+	range_src := greet_src('<ul><li @for="i in 0..n">{{ i }}</li></ul>')
+	assert range_src.contains('return if (g.n.get()) > (0) { (g.n.get()) - (0) } else { 0 }')
+	sum_src := greet_src('<ul><li @for="w in name.split(\' \') + [\'x\']">{{ w }}</li></ul>')
+	assert sum_src.contains("return (g.name.get().split(' ') + ['x']).len")
+}
+
+fn test_handler_value_is_trimmed() {
+	c := analyze(
+		v:    counter_v
+		html: '<main><button @click=" inc ">+</button></main>'
+	)!
+	assert c.codegen()!.source.contains('c.inc()')
+}
+
+fn test_a_signal_passed_as_mut_or_ref_stays_the_signal() {
+	src := greet_src('<div><button @click="label(mut n)">a</button><i @click="label(&name)">b</i></div>')
+	assert src.contains('g.label(mut g.n)') && src.contains('g.label(&g.name)')
 }

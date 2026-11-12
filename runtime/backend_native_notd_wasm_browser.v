@@ -1,8 +1,13 @@
 // The NATIVE rendering backend (default; compiled when -d wasm_browser is NOT set).
 //
-// An in-memory mock DOM (`Node` tree) built by reusing vcsr's own template parser,
-// so the whole engine is testable without a browser. `instance()` clones the
-// skeleton; bind_*(_ctx) wire each slot to a reactive effect; html() serializes.
+// An in-memory mock DOM (`Node` tree), so the whole engine is testable without a
+// browser. It reads a skeleton the way the browser does (parser.parse_html:
+// references decoded, whitespace as written, names lowercased) and html()
+// serializes a view the way the browser's outerHTML does, so a native test sees
+// what Chrome shows. A slot path or anchor the browser couldn't resolve panics
+// here too.
+// `instance()` clones the skeleton; bind_*(_ctx) wire each slot to a reactive
+// effect; html() serializes.
 // The wasm backend (backend_wasm_d_wasm_browser.v) presents the SAME public API
 // (Template.instance / bind_*_ctx / Instance.view / View) but drives the real DOM
 // through host FFI and holds no maps (string-keyed maps don't run on wasm — see
@@ -14,25 +19,28 @@ import vcsr
 import vcsr.ast
 import vcsr.parser
 
-// Node is a DOM node — the NATIVE mock backend (an in-memory tree). A node is
-// either a text node (`is_text`, content in `text`) or an element. `children` is
-// the ORDERED child list — text and element nodes interleaved as in the source —
-// so serialization preserves order; `path` indexing counts only element children
-// (see element_child), matching the element-child-index paths phase 02 emits.
+// Node is a DOM node — the NATIVE mock backend (an in-memory tree). A node is a
+// text node (`is_text`), a comment (`is_comment`) or an element; `text` holds a
+// text or comment node's content, decoded as in the DOM. `children` is the
+// ORDERED child list — text, comment and element nodes interleaved as in the
+// source — so serialization preserves order; `path` indexing counts only element
+// children (see element_child), matching the element-child-index paths phase 02
+// emits.
 @[heap]
 struct Node {
 mut:
-	is_text  bool // text node: `text` is the content; tag/attrs/children unused
-	tag      string
-	text     string // text-node content
-	attrs    map[string]string
-	value    string // form value (two-way bind)
-	visible  bool = true // @if toggle
-	children []&Node          // ordered: text nodes + element nodes
-	on       map[string]fn () // event name → handler (closure form, native)
-	on_input fn (v string) = unsafe { nil } // two-way input writer (closure form, native)
+	is_text    bool // text node: `text` is the content; tag/attrs/children unused
+	is_comment bool // comment node: a slot anchor (`<!---->`) in a skeleton
+	tag        string
+	text       string // text/comment content
+	attrs      map[string]string
+	raw        bool               // a raw-text element (script, style, …): html() writes its text as is
+	value      string             // form value (two-way bind)
+	children   []&Node            // ordered: text, comment and element nodes
+	on         map[string][]fn () // event name → handlers, in order (closure form, native)
+	on_input   fn (v string) = unsafe { nil } // two-way input writer (closure form, native)
 	// closure-FREE handler slots (what codegen emits; wasm-safe — see signal.v):
-	on_ctx       map[string]EvtHandler // event name → (top-level fn + ctx)
+	on_ctx       map[string][]EvtHandler // event name → (top-level fn + ctx), in order
 	on_input_ctx &InputHandler = unsafe { nil } // two-way writer (top-level fn + ctx)
 }
 
@@ -50,9 +58,14 @@ struct InputHandler {
 	ctx voidptr
 }
 
-// set_text sets an element's textContent — replacing its children with one text
-// node, like the DOM setter.
+// set_text sets a node's textContent like the DOM setter: a text or comment
+// node takes the string as its content; an element's children are replaced by
+// one text node.
 fn (mut n Node) set_text(s string) {
+	if n.is_text || n.is_comment {
+		n.text = s
+		return
+	}
 	n.children = [
 		&Node{
 			is_text: true
@@ -97,7 +110,7 @@ pub fn (t Template) instance() Instance {
 	root := build_tree(t.html)
 	mut slots := []&Node{cap: t.slots.len}
 	for d in t.slots {
-		slots << node_at(root, d.path)
+		slots << slot_node(root, d)
 	}
 	return Instance{
 		root:  root
@@ -136,7 +149,9 @@ pub fn bind_attr(mut ins Instance, i int, name string, get fn () string) {
 pub fn bind_event(mut ins Instance, i int, handler fn ()) {
 	name := ins.descs[i].name
 	mut node := ins.slots[i]
-	node.on[name] = handler
+	mut hs := node.on[name] or { []fn (){} }
+	hs << handler
+	node.on[name] = hs
 }
 
 // bind_value is two-way: the slot's value follows `get`, and an input event
@@ -149,25 +164,25 @@ pub fn bind_value(mut ins Instance, i int, get fn () string, set fn (v string)) 
 	node.on_input = set
 }
 
-// bind_if makes a slot element present only while `get` is true.
+// bind_if keeps an @if anchor's condition live (see cond_anchor_text).
 pub fn bind_if(mut ins Instance, i int, get fn () bool) {
 	mut node := ins.slots[i]
 	ins.effects << vcsr.effect_handle(fn [mut node, get] () {
-		node.visible = get()
+		node.set_text(cond_anchor_text(get()))
 	})
 }
 
-// bind_list tracks a keyed list's length reactively.
+// bind_list keeps an @for anchor's item count live (see list_anchor_text).
 //
 // NOTE: the codegen contract currently supplies only the row COUNT (`fn () int`).
 // Per-row cloning + keyed (`:key`) reconciliation — the real payoff — needs the
 // row sub-template and a render closure, which is the next codegen↔runtime
-// co-design step (DESIGN.md). Until then this keeps the length dependency live
-// (exposed as `data-count`) so the wiring is correct and observable.
+// co-design step (DESIGN.md, roadmap 5). Until then this keeps the length
+// dependency live, shown on the anchor, so the wiring is correct and observable.
 pub fn bind_list(mut ins Instance, i int, count fn () int) {
 	mut node := ins.slots[i]
 	ins.effects << vcsr.effect_handle(fn [mut node, count] () {
-		node.attrs['data-count'] = count().str()
+		node.set_text(list_anchor_text(count()))
 	})
 }
 
@@ -233,10 +248,12 @@ pub fn bind_attr_ctx(mut ins Instance, i int, name string, ctx voidptr, get fn (
 pub fn bind_event_ctx(mut ins Instance, i int, ctx voidptr, handler fn (ctx voidptr)) {
 	name := ins.descs[i].name
 	mut node := ins.slots[i]
-	node.on_ctx[name] = EvtHandler{
+	mut hs := node.on_ctx[name] or { []EvtHandler{} }
+	hs << EvtHandler{
 		run: handler
 		ctx: ctx
 	}
+	node.on_ctx[name] = hs
 }
 
 @[heap]
@@ -278,10 +295,10 @@ struct IfBind {
 fn patch_if(p voidptr) {
 	b := unsafe { &IfBind(p) }
 	mut n := b.node
-	n.visible = b.get(b.ctx)
+	n.set_text(cond_anchor_text(b.get(b.ctx)))
 }
 
-// bind_if_ctx makes slot `i` present only while `get(ctx)` is true.
+// bind_if_ctx keeps @if anchor `i`'s condition `get(ctx)` live.
 pub fn bind_if_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) bool) {
 	b := &IfBind{
 		node: ins.slots[i]
@@ -301,10 +318,10 @@ struct ListBind {
 fn patch_list(p voidptr) {
 	b := unsafe { &ListBind(p) }
 	mut n := b.node
-	n.attrs['data-count'] = b.count(b.ctx).str()
+	n.set_text(list_anchor_text(b.count(b.ctx)))
 }
 
-// bind_list_ctx tracks a keyed list's length reactively (count(ctx)).
+// bind_list_ctx keeps @for anchor `i`'s item count `count(ctx)` live.
 pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr) int) {
 	b := &ListBind{
 		node:  ins.slots[i]
@@ -330,16 +347,17 @@ pub fn (mut ins Instance) dispose() {
 // bridge does when a real DOM event arrives.
 pub fn (mut ins Instance) dispatch(i int, event string) {
 	mut node := ins.slots[i]
-	if h := node.on[event] {
+	for h in node.on[event] or { []fn (){} } {
 		h() // closure handler (native)
 	}
-	if h := node.on_ctx[event] {
+	for h in node.on_ctx[event] or { []EvtHandler{} } {
 		h.run(h.ctx) // closure-free handler (codegen/wasm)
 	}
 }
 
-// input simulates a user typing into a two-way-bound slot: set the value, then
-// run the registered writer (as a real `input` event would).
+// input simulates a user typing into a two-way-bound slot: set the value, run
+// the registered writer, then any @input handlers (as a real `input` event
+// would: codegen registers @bind before the element's events).
 pub fn (mut ins Instance) input(i int, v string) {
 	mut node := ins.slots[i]
 	node.value = v
@@ -349,6 +367,7 @@ pub fn (mut ins Instance) input(i int, v string) {
 	if node.on_input_ctx != unsafe { nil } {
 		node.on_input_ctx.set(node.on_input_ctx.ctx, v) // closure-free writer (codegen/wasm)
 	}
+	ins.dispatch(i, 'input')
 }
 
 // value_of reads a slot element's current value — what the host reads off the
@@ -359,23 +378,25 @@ pub fn (ins Instance) value_of(i int) string {
 
 // --- the native mock DOM ----------------------------------------------------
 
-// build_tree parses the static skeleton into an element tree, reusing vcsr's own
-// template parser so the element-child indexing matches the emitted paths.
+// build_tree parses the static skeleton into a node tree the way the browser
+// does (parser.parse_html), so the element-child indexing matches the emitted
+// paths and the text matches the page. vcsr emitted the skeleton, so one that
+// does not parse is a bug in vcsr: fail loudly.
 fn build_tree(html string) &Node {
-	tree := parser.parse_template(html) or { return &Node{
-		tag: 'div'
-	} }
+	tree := parser.parse_html(html) or {
+		panic('vcsr: the native mock cannot parse a compiled skeleton (${err.msg()}): ${html}')
+	}
 	return convert(tree.root)
 }
 
 // convert turns an AST element into a mock Node, preserving child ORDER: static
-// attrs carried over; text children become text nodes in place; element and
-// component children are recursed. (Interpolation children don't appear — the
-// skeleton's holes are emptied.) Text nodes stay in `children` so they keep
-// their position relative to elements.
+// attrs carried over; text and comment children become text and comment nodes
+// in place; element children are recursed. Text nodes stay in `children` so
+// they keep their position relative to elements.
 fn convert(n ast.Node) &Node {
 	mut node := &Node{
 		tag: n.tag
+		raw: n.raw_text
 	}
 	for a in n.attrs {
 		node.attrs[a.name] = a.value
@@ -391,10 +412,44 @@ fn convert(n ast.Node) &Node {
 			.element, .component {
 				node.children << convert(ch)
 			}
-			.interpolation {} // skeleton holes are emptied; none here
+			.comment {
+				node.children << &Node{
+					is_comment: true
+					text:       ch.text
+				}
+			}
+			.interpolation {} // HTML has none
 		}
 	}
 	return node
+}
+
+// slot_node resolves a slot's node: the element at `path`, or — for an
+// anchored slot — that element's anchor-th comment child. An anchored TEXT slot
+// gets a fresh text node inserted before its anchor, which its binding patches.
+fn slot_node(root &Node, d SlotDesc) &Node {
+	mut n := node_at(root, d.path)
+	if d.anchor < 0 {
+		return n
+	}
+	mut k := 0
+	for i, ch in n.children {
+		if !ch.is_comment {
+			continue
+		}
+		if k == d.anchor {
+			if d.kind != .text {
+				return ch
+			}
+			t := &Node{
+				is_text: true
+			}
+			n.children.insert(i, t)
+			return t
+		}
+		k++
+	}
+	panic('vcsr: anchor ${d.anchor} not found in <${n.tag}>') // what the host throws
 }
 
 // node_at walks `path` down element children (text nodes don't count, matching
@@ -407,12 +462,13 @@ fn node_at(root &Node, path []int) &Node {
 	return cur
 }
 
-// element_child returns the `idx`-th ELEMENT child of `n`, skipping text nodes.
-// A bad index degrades to `n` itself rather than panicking.
+// element_child returns the `idx`-th ELEMENT child of `n`, skipping text and
+// comment nodes. A path that doesn't resolve means vcsr's tree and the
+// browser's differ, which the host can't patch either: fail loudly.
 fn element_child(n &Node, idx int) &Node {
 	mut ei := 0
 	for ch in n.children {
-		if ch.is_text {
+		if ch.is_text || ch.is_comment {
 			continue
 		}
 		if ei == idx {
@@ -420,38 +476,73 @@ fn element_child(n &Node, idx int) &Node {
 		}
 		ei++
 	}
-	return n
+	panic('vcsr: no element child ${idx} in <${n.tag}>')
 }
 
-// void_tags get no closing tag (HTML void elements).
-const void_tags = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
-	'param', 'source', 'track', 'wbr']
-
-// html serializes the live tree (an @if-hidden element renders as nothing).
+// html serializes the live tree the way the browser's outerHTML does: text and
+// attribute values escaped, comments and void elements as HTML writes them.
 pub fn (v View) html() string {
 	mut sb := strings.new_builder(128)
-	write_html(mut sb, v.root)
+	write_html(mut sb, v.root, false)
 	return sb.str()
 }
 
-fn write_html(mut sb strings.Builder, n &Node) {
+fn write_html(mut sb strings.Builder, n &Node, raw bool) {
 	if n.is_text {
+		if raw {
+			sb.write_string(n.text)
+		} else {
+			write_escaped(mut sb, n.text, false)
+		}
+		return
+	}
+	if n.is_comment {
+		sb.write_string('<!--')
 		sb.write_string(n.text)
+		sb.write_string('-->')
 		return
 	}
-	if !n.visible {
-		return
-	}
-	sb.write_string('<${n.tag}')
+	sb.write_u8(`<`)
+	sb.write_string(n.tag)
 	for k, val in n.attrs {
-		sb.write_string(' ${k}="${val}"')
+		sb.write_u8(` `)
+		sb.write_string(k)
+		sb.write_string('="')
+		write_escaped(mut sb, val, true)
+		sb.write_u8(`"`)
 	}
-	sb.write_string('>')
-	if n.tag in void_tags {
+	sb.write_u8(`>`)
+	if parser.is_void(n.tag) {
 		return
 	}
 	for ch in n.children {
-		write_html(mut sb, ch)
+		write_html(mut sb, ch, n.raw)
 	}
-	sb.write_string('</${n.tag}>')
+	sb.write_string('</')
+	sb.write_string(n.tag)
+	sb.write_u8(`>`)
+}
+
+// write_escaped escapes text the way the HTML serializer does: `&`, a no-break
+// space, `<` and `>`, plus `"` in an attribute value.
+fn write_escaped(mut sb strings.Builder, s string, in_attr bool) {
+	mut i := 0
+	for i < s.len {
+		c := s[i]
+		if c == `&` {
+			sb.write_string('&amp;')
+		} else if c == `<` {
+			sb.write_string('&lt;')
+		} else if c == `>` {
+			sb.write_string('&gt;')
+		} else if c == `"` && in_attr {
+			sb.write_string('&quot;')
+		} else if c == 0xC2 && i + 1 < s.len && s[i + 1] == 0xA0 {
+			sb.write_string('&nbsp;') // U+00A0 in UTF-8
+			i++
+		} else {
+			sb.write_u8(c)
+		}
+		i++
+	}
 }
