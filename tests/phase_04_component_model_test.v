@@ -12,6 +12,7 @@
 module main
 
 import vcsr.component { HoistDecision, analyze }
+import vcsr.css
 
 // A component fixture: the three files' contents. `analyze` is what vcsr does
 // after reading them off disk (paired by basename).
@@ -102,14 +103,36 @@ fn test_generated_code_imports_only_runtime() {
 fn test_generated_view_embeds_static_skeleton() {
 	src := counter().codegen()!.source
 	// the static HTML skeleton is embedded as a plain string constant
-	assert src.contains('\'<main class="counter"><h1></h1><button>+1</button></main>\'')
+	// every element carries the component's scope attribute (the counter has a .css)
+	a := css.scope_attr('Counter')
+	assert src.contains('\'<main class="counter" ${a}><h1 ${a}></h1><button ${a}>+1</button></main>\'')
 }
 
-fn test_style_is_scoped_in_generated_code() {
+fn test_style_is_scoped_to_the_markup() {
+	// the scoped rule requires the attribute the markup carries; `.muted` is
+	// used by no element of the template, so it is tree-shaken
 	src := counter().codegen()!.source
-	// `.counter`/`.muted` are rewritten to component-scoped names (phase 05)
-	assert !src.contains("'.counter {") // not the raw selector
-	assert src.contains('counter_') // scoped
+	a := css.scope_attr('Counter')
+	assert src.contains("css:   '.counter[${a}]{display: grid;}'")
+	assert src.contains("return '.counter[${a}]{display: grid;}'") // style()
+	assert !src.contains('.muted')
+}
+
+fn test_dynamic_class_keeps_every_rule_and_no_css_means_no_attribute() {
+	c := analyze(v: counter_v, html: '<main :class="count">x</main>', css: counter_css)!
+	assert c.codegen()!.source.contains('.muted[')
+	plain := analyze(v: counter_v, html: '<main class="counter">x</main>')!
+	assert plain.tmpl.html == '<main class="counter">x</main>'
+}
+
+fn test_class_bindings_become_toggle_and_classes_slots() {
+	c := analyze(v: counter_v, html: '<main class="a" class:on="count > 0" :class="\'b\'">x</main>')!
+	assert c.tmpl.slots.map(it.kind.str()) == ['toggle', 'classes']
+	assert c.tmpl.html == '<main class="a">x</main>' // the static class stays
+	src := c.codegen()!.source
+	assert src.contains("runtime.SlotDesc{ kind: .toggle, path: []int{}, name: 'on' }")
+	assert src.contains('return c.count.get() > 0')
+	assert src.contains('runtime.bind_classes_ctx(mut ins, 1,')
 }
 
 // --- composition + hoisting -------------------------------------------------

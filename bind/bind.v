@@ -109,6 +109,14 @@ pub fn plan(ct CompiledTemplate) !BindingPlan {
 					row_plan: plan(s.row)!
 				}
 			}
+			.toggle, .classes {
+				bp.bindings << Binding{
+					kind:       .effect
+					slot:       i
+					reads:      free_idents(s.expr)
+					writes_dom: .attribute
+				}
+			}
 			.list {
 				bp.bindings << Binding{
 					kind:     .keyed_list

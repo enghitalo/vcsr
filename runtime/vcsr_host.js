@@ -64,6 +64,12 @@ export async function boot(wasmUrl = './core.wasm') {
     host_set_text(h, p, l) { H[h].textContent = rd(p, l); },
     host_set_attr(h, np, nl, vp, vl) { H[h].setAttribute(rd(np, nl), rd(vp, vl)); },
     host_set_value(h, p, l) { H[h].value = rd(p, l); },
+    host_toggle_class(h, np, nl, on) { H[h].classList.toggle(rd(np, nl), on !== 0); },
+    host_add_style(p, l) {
+      const s = document.createElement('style');
+      s.textContent = rd(p, l);
+      document.head.appendChild(s);
+    },
     // events: the module is called back by index; default actions are left alone
     host_on(h, ep, el, cb) { H[h].addEventListener(rd(ep, el), () => dispatch(cb)); },
     host_on_input(h, cb) {

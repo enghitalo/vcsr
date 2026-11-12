@@ -29,12 +29,14 @@ module runtime
 
 // SlotKind classifies a dynamic hole. Matches phase 02 / phase 04 exactly.
 pub enum SlotKind {
-	text  // an element's textContent follows an expression
-	attr  // an attribute value follows an expression (`name`)
-	event // a DOM event runs a handler (`name` = event, e.g. 'click')
-	bind  // two-way: value follows an expression AND writes back on input
-	cond  // @if: an anchor; its row shows while the expression is true (roadmap 4)
-	list  // @for: an anchor; a keyed list of rows (roadmap 5)
+	text    // an element's textContent follows an expression
+	attr    // an attribute value follows an expression (`name`)
+	event   // a DOM event runs a handler (`name` = event, e.g. 'click')
+	bind    // two-way: value follows an expression AND writes back on input
+	cond    // @if: an anchor; its row shows while the expression is true (roadmap 4)
+	list    // @for: an anchor; a keyed list of rows (roadmap 5)
+	toggle  // class:name: class `name` is on while the expression is true
+	classes // :class: the classes the expression names, beside the static ones
 }
 
 // SlotDesc locates one hole and says what it is. Emitted as a plain const by
@@ -47,11 +49,36 @@ pub:
 	name   string // attribute name (attr) or event name (event); else ''
 }
 
-// Template is a component's compiled form: the static skeleton + the slot table.
+// Template is a component's compiled form: the static skeleton + the slot table,
+// plus its scoped stylesheet, which instance() adds to the page once.
 pub struct Template {
 pub:
 	html  string
 	slots []SlotDesc
+	css   string
+}
+
+__global (
+	vcsr_styles []string // the stylesheets added so far, in order
+)
+
+// add_style records `css` as added, and reports whether it is new (so the
+// backend adds it to the page once, however many instances there are).
+fn add_style(css string) bool {
+	if css == '' || css in vcsr_styles {
+		return false
+	}
+	vcsr_styles << css
+	return true
+}
+
+// class_diff lists the classes to remove (in `old`, not in `new`) and to add
+// (in `new`, not in `old`) when a `:class` value changes; classList does the
+// rest, so the element's static classes and class:x toggles are left alone.
+fn class_diff(old string, new string) ([]string, []string) {
+	o := old.fields()
+	n := new.fields()
+	return o.filter(it !in n), n.filter(it !in o)
 }
 
 // cond_anchor_text and list_anchor_text are what an @if / @for anchor comment

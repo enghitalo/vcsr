@@ -25,6 +25,8 @@ fn C.host_anchor_text(node int, k int) int
 fn C.host_set_text(node int, ptr &u8, len int)
 fn C.host_set_attr(node int, np &u8, nl int, vp &u8, vl int)
 fn C.host_set_value(node int, ptr &u8, len int)
+fn C.host_toggle_class(node int, np &u8, nl int, on int)
+fn C.host_add_style(css &u8, len int)
 fn C.host_on(node int, ev &u8, el int, cb_idx int)
 fn C.host_on_input(node int, cb_idx int)
 fn C.host_mount(root int, sel &u8, len int)
@@ -60,6 +62,9 @@ pub fn (mut v View) dispose() {
 // the element-child path host-side.
 pub fn (t Template) instance() Instance {
 	init_host()
+	if add_style(t.css) {
+		C.host_add_style(t.css.str, t.css.len)
+	}
 	tpl := C.host_register_template(t.html.str, t.html.len)
 	root := C.host_clone(tpl)
 	mut slots := []int{cap: t.slots.len}
@@ -217,6 +222,64 @@ pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr
 		count:  count
 	}
 	ins.effects << vcsr.effect_handle_ctx(patch_list, voidptr(b))
+}
+
+@[heap]
+struct ToggleBind {
+	handle int
+	name   string
+	ctx    voidptr
+	get    fn (ctx voidptr) bool = unsafe { nil }
+}
+
+fn patch_toggle(p voidptr) {
+	b := unsafe { &ToggleBind(p) }
+	C.host_toggle_class(b.handle, b.name.str, b.name.len, if b.get(b.ctx) { 1 } else { 0 })
+}
+
+// bind_toggle_ctx keeps class `name` (the slot's name) on slot `i` while
+// `get(ctx)` is true: class:name="expr".
+pub fn bind_toggle_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) bool) {
+	b := &ToggleBind{
+		handle: ins.slots[i]
+		name:   ins.descs[i].name
+		ctx:    ctx
+		get:    get
+	}
+	ins.effects << vcsr.effect_handle_ctx(patch_toggle, voidptr(b))
+}
+
+@[heap]
+struct ClassesBind {
+	handle int
+	ctx    voidptr
+	get    fn (ctx voidptr) string = unsafe { nil }
+mut:
+	last string // the classes added last time
+}
+
+fn patch_classes(p voidptr) {
+	mut b := unsafe { &ClassesBind(p) }
+	now := b.get(b.ctx)
+	gone, added := class_diff(b.last, now)
+	for c in gone {
+		C.host_toggle_class(b.handle, c.str, c.len, 0)
+	}
+	for c in added {
+		C.host_toggle_class(b.handle, c.str, c.len, 1)
+	}
+	b.last = now
+}
+
+// bind_classes_ctx adds the classes `get(ctx)` names to slot `i`, beside its
+// static ones: :class="expr".
+pub fn bind_classes_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) string) {
+	b := &ClassesBind{
+		handle: ins.slots[i]
+		ctx:    ctx
+		get:    get
+	}
+	ins.effects << vcsr.effect_handle_ctx(patch_classes, voidptr(b))
 }
 
 // --- event dispatch: host → wasm callbacks via integer indices --------------

@@ -1,0 +1,23 @@
+/* Panel styles, scoped to Panel: `.label` here can't reach Badge's `.label`. */
+.panel { display: grid; gap: .6rem; padding: 16px; border-radius: 12px; background: rgb(255, 255, 255); border: 1px solid #dde1e8; }
+.panel.big { font-size: 20px; }
+.panel.small { font-size: 14px; }
+
+/* an ancestor themes a descendant: .dark is on the section, .title inside it */
+.dark { background: rgb(29, 35, 48); }
+.title { margin: 0; color: rgb(29, 35, 48); }
+.dark .title { color: rgb(255, 255, 255); }
+
+.label { margin: 0; color: rgb(200, 30, 30); }
+.row { margin: 0; color: #8a92a3; font-size: 16px; }
+
+.spinner { display: inline-block; vertical-align: middle; width: 1em; height: 1em; border: 3px solid #3451b2; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg) } }
+
+/* wider screens get more room */
+@media (min-width: 600px) {
+  .panel { padding: 24px; }
+}
+
+.actions { display: flex; gap: .5rem; }
+button { font: inherit; font-size: 15px; padding: .35rem .9rem; border-radius: 6px; border: 1px solid #c9ced8; background: #fff; cursor: pointer; }

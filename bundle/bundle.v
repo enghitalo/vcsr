@@ -3,7 +3,7 @@
 // build() turns a fixture app directory into a servable dist/ bundle and an
 // in-memory Bundle handle: an empty-body index.html that loads the hashed
 // loader, content-hashed filenames for every cacheable asset, precompressed
-// (.br/.gz) siblings, a source map, the atomized app.css, and manifest.json.
+// (.br/.gz) siblings, a source map, the bundled app.css, and manifest.json.
 // vanilla's http_server.static_assets then serves dist/ as-is (phase 10).
 //
 // NOTE ON THE WASM STEP: V cannot yet compile a browser-ready wasm module
@@ -153,7 +153,7 @@ pub fn build(dir string, opt BuildOpt) !Bundle {
 
 	// 2) app.css: an app may ship a verbatim global stylesheet at src/styles.css
 	// (used as-is, no scoping — for a hand-written runtime whose class names are
-	// fixed); otherwise each component's styles are scoped and atomized.
+	// fixed); otherwise each component's styles are scoped and bundled (css.bundle).
 	custom_css := os.join_path(dir, 'src', 'styles.css')
 	css_text := if os.exists(custom_css) {
 		os.read_file(custom_css)!
@@ -163,7 +163,7 @@ pub fn build(dir string, opt BuildOpt) !Bundle {
 			scoped << css.scope(comp, style)!
 		}
 		if scoped.len > 0 {
-			css.atomize(scoped)!.text
+			css.bundle(scoped).text
 		} else {
 			'/* no styles */'
 		}

@@ -308,3 +308,53 @@ fn test_skeleton_names_fold_and_raw_text_round_trips() {
 	mut ins := tpl.instance()
 	assert ins.view().html() == '<div tabindex="0"><xmp>a &amp; <b></xmp><p>x</p></div>'
 }
+
+struct Theme {
+mut:
+	on   &vcsr.Signal[bool]
+	kind &vcsr.Signal[string]
+}
+
+fn theme_on(ctx voidptr) bool {
+	t := unsafe { &Theme(ctx) }
+	return t.on.get()
+}
+
+fn theme_kind(ctx voidptr) string {
+	t := unsafe { &Theme(ctx) }
+	return t.kind.get()
+}
+
+// class:name toggles one class and :class adds the classes it names, both
+// through classList: the static class and each other's classes stay
+fn test_class_toggle_and_classes_keep_the_static_class() {
+	mut t := Theme{
+		on:   signal(false)
+		kind: signal('big red')
+	}
+	tpl := Template{
+		html:  '<div class="card"></div>'
+		slots: [SlotDesc{
+			kind: .toggle
+			path: []
+			name: 'on'
+		}, SlotDesc{
+			kind: .classes
+			path: []
+		}]
+		css:   '.card{x:1}'
+	}
+	mut ins := tpl.instance()
+	runtime.bind_toggle_ctx(mut ins, 0, voidptr(&t), theme_on)
+	runtime.bind_classes_ctx(mut ins, 1, voidptr(&t), theme_kind)
+	dom := ins.view()
+	assert dom.html() == '<div class="card big red"></div>'
+	t.on.set(true)
+	t.kind.set('red small')
+	assert dom.html() == '<div class="card red on small"></div>'
+	t.on.set(false)
+	assert dom.html() == '<div class="card red small"></div>'
+	// a component's stylesheet is added once, however many instances
+	_ := tpl.instance()
+	assert runtime.styles().filter(it == '.card{x:1}').len == 1
+}

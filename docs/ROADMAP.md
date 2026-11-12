@@ -19,7 +19,7 @@ ships an example under `examples/` whose README shows a screenshot taken by
   content after the root, attribute escaping, closing tags for self-closed
   non-void elements, line:col errors; text mixed with interpolations; one
   shared expression lexer for `free_idents` and `qualify`.
-- [ ] **3. Styles end to end** ★ `examples/styling`
+- [x] **3. Styles end to end** ★ `examples/styling`
   One scoper (`css.scope`); codegen rewrites template class names; `style()`
   is injected once per component on wasm; harden the CSS tokenizer (comments,
   strings, `url()`, at-rules); stop `atomize` from reordering the cascade;
