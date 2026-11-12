@@ -323,7 +323,7 @@ fn (c &Component) emit_slot_helper(mut b strings.Builder, i int, s slots.SlotDes
 			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
 			b.write_string('\treturn runtime.to_str(${c.qualify(s.target_expr, true)})\n}\n\n')
 			b.write_string('fn ${lower}_slot${i}_set(ctxp voidptr, v string) {\n${cast}')
-			b.write_string('\t${c.qualify(s.target_expr, false)}.set(v)\n}\n\n')
+			b.write_string('\t${c.qualify(s.target_expr.trim_space() + '.set', false)}(v)\n}\n\n')
 		}
 		.cond {
 			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) bool {\n${cast}')
@@ -331,7 +331,7 @@ fn (c &Component) emit_slot_helper(mut b strings.Builder, i int, s slots.SlotDes
 		}
 		.list {
 			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) int {\n${cast}')
-			b.write_string('\treturn ${c.qualify(s.source_expr, true)}.len\n}\n\n')
+			b.write_string('\treturn ${c.list_count(s.source_expr)}\n}\n\n')
 		}
 	}
 }
@@ -354,14 +354,15 @@ fn (c &Component) text_value(s slots.SlotDesc) string {
 }
 
 // qualify rewrites a template expression's free identifiers into receiver-scoped
-// V: a signal field becomes `recv.name.get()` in a value context (or `recv.name`
-// in a call context, so `.set(…)` chains), a plain field/method becomes
-// `recv.name`, and anything else (a @for loop variable, an external) is left as
-// is. It works on bind.tokens, so member tails, literals, keywords and builtin
-// type names pass through untouched, and identifiers inside `${}` string
-// interpolations are qualified too — always as values, since a string can only
-// interpolate one. A field named like a soft keyword (`type`, `it`) is
-// qualified unless V reads the name as syntax there (see soft_keyword_is_syntax).
+// V. A signal field is the Signal (`recv.name`) only where its own API follows
+// (`name.set(…)`, `.update`, `.get`, `.peek`) and its value (`recv.name.get()`)
+// everywhere else. A computed method is called in a value context
+// (`{{ doubled }}` → `recv.doubled()`) and stays a method value in a handler;
+// inside `${}` it is always a value. A plain field becomes `recv.name`, and
+// anything else (a @for loop variable, an external) is left as is. It works on
+// bind.tokens, so member tails and literals pass through untouched. A member
+// named like a V keyword (`type`, `go`, `match`) is qualified too, except where
+// V reads the name as syntax (see bind.soft_keyword_is_syntax).
 fn (c &Component) qualify(expr string, value_ctx bool) string {
 	recv := c.recv()
 	toks := bind.tokens(expr)
@@ -371,21 +372,22 @@ fn (c &Component) qualify(expr string, value_ctx bool) string {
 		if t.kind == .interp {
 			interp += if t.text == '}' { -1 } else { 1 }
 		}
-		is_ref := t.kind == .ident || (t.kind == .keyword && bind.is_soft_keyword(t.text)
-			&& c.resolves_ref(t.text) && !soft_keyword_is_syntax(toks, i))
+		is_ref := t.kind == .ident || (t.kind == .keyword && t.text !in ['true', 'false', 'none']
+			&& c.resolves_ref(t.text)
+			&& !(bind.is_soft_keyword(t.text) && bind.soft_keyword_is_syntax(toks, i)))
 		if !is_ref {
 			out.write_string(t.text)
 			continue
 		}
 		name := t.text
-		value := value_ctx || interp > 0
 		if c.is_signal(name) {
-			out.write_string('${recv}.${name}' + if value { '.get()' } else { '' })
+			out.write_string('${recv}.${name}' + if next_is_signal_api(toks, i) {
+				''
+			} else {
+				'.get()'
+			})
 		} else if c.has_method(name) && !c.is_field(name) {
-			// A computed: a bare method in a value context is CALLED
-			// (`{{ doubled }}` → `c.doubled()`), unless the template already
-			// wrote the parens; in an event context it stays a method value.
-			if value && !next_is_call(toks, i) {
+			if (value_ctx || interp > 0) && !bind.next_is_call(toks, i) {
 				out.write_string('${recv}.${name}()')
 			} else {
 				out.write_string('${recv}.${name}')
@@ -399,52 +401,41 @@ fn (c &Component) qualify(expr string, value_ctx bool) string {
 	return out.str()
 }
 
-// soft_keyword_is_syntax reports whether the soft keyword at toks[i] is V syntax
-// there rather than a reference: a builtin type name called as a cast
-// (`int(x)`), or `it` inside the argument of `filter`/`map`/`any`/`all`/`count`.
-fn soft_keyword_is_syntax(toks []bind.Token, i int) bool {
-	if toks[i].text != 'it' {
-		return toks[i].text != 'type' && next_is_call(toks, i)
+// next_is_signal_api reports whether toks[i] is followed by `.get`, `.peek`,
+// `.set` or `.update`: the Signal itself is meant there, not its value.
+fn next_is_signal_api(toks []bind.Token, i int) bool {
+	mut k := i + 1
+	for k < toks.len && toks[k].kind == .space {
+		k++
 	}
-	mut depth := 0
-	for k := i - 1; k >= 0; k-- {
-		if toks[k].kind != .punct {
-			continue
-		}
-		if toks[k].text == ')' {
-			depth++
-		} else if toks[k].text == '(' {
-			if depth > 0 {
-				depth--
-				continue
-			}
-			for m := k - 1; m >= 0; m-- {
-				if toks[m].kind == .space {
-					continue
-				}
-				if toks[m].kind == .member && toks[m].text in it_methods {
-					return true
-				}
-				break
-			}
-		}
+	if k >= toks.len || toks[k].text != '.' {
+		return false
 	}
-	return false
+	k++
+	for k < toks.len && toks[k].kind == .space {
+		k++
+	}
+	return k < toks.len && toks[k].kind == .member && toks[k].text in ['get', 'peek', 'set', 'update']
 }
 
-// it_methods are V's array methods whose argument sees the element as `it`.
-const it_methods = ['filter', 'map', 'any', 'all', 'count']
-
-// next_is_call reports whether the token after `i` (skipping spaces) opens a
-// call: `doubled ()`.
-fn next_is_call(toks []bind.Token, i int) bool {
-	for k := i + 1; k < toks.len; k++ {
-		if toks[k].kind == .space {
-			continue
+// list_count renders the item count of a @for source as V. A range (`0..n`) has
+// no `.len`, so it is `hi - lo` (never negative); anything else is `(source).len`.
+fn (c &Component) list_count(source string) string {
+	toks := bind.tokens(source)
+	mut depth := 0
+	for k := 0; k + 1 < toks.len; k++ {
+		t := toks[k].text
+		if toks[k].kind == .punct && t in ['(', '[', '{'] {
+			depth++
+		} else if toks[k].kind == .punct && t in [')', ']', '}'] {
+			depth--
+		} else if depth == 0 && t == '.' && toks[k + 1].text == '.' {
+			lo := c.qualify(toks[..k].map(it.text).join(''), true).trim_space()
+			hi := c.qualify(toks[k + 2..].map(it.text).join(''), true).trim_space()
+			return 'if (${hi}) > (${lo}) { (${hi}) - (${lo}) } else { 0 }'
 		}
-		return toks[k].kind == .punct && toks[k].text == '('
 	}
-	return false
+	return '(${c.qualify(source, true)}).len'
 }
 
 fn (c &Component) recv() string {

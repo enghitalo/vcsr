@@ -139,7 +139,8 @@ fn idents_of(exprs []string) []string {
 // free_idents extracts the base free identifiers of an expression, in order of
 // first appearance — the identifiers the component must resolve (signals,
 // fields, methods) or the template must bind (@for loop variables). Member
-// tails (`.x`), literals, V keywords and builtin type names are excluded;
+// tails (`.x`), literals, V keywords and builtin type names are excluded (but
+// `type`, and `it` outside filter/map/…, are references);
 // identifiers inside `${}` string interpolations are included.
 //   'count'                -> ['count']
 //   'a + b * 2'            -> ['a', 'b']
@@ -149,8 +150,13 @@ fn idents_of(exprs []string) []string {
 // Public so phase 04 can resolve the same candidate set against the struct.
 pub fn free_idents(expr string) []string {
 	mut out := []string{}
-	for t in tokens(expr) {
-		if t.kind == .ident && t.text !in out {
+	toks := tokens(expr)
+	for i, t in toks {
+		// `type` and `it` are names V reserves but can't read as syntax here:
+		// references (a component may have a field called `type`)
+		is_ref := t.kind == .ident || (t.kind == .keyword && t.text in ['type', 'it']
+			&& !soft_keyword_is_syntax(toks, i))
+		if is_ref && t.text !in out {
 			out << t.text
 		}
 	}

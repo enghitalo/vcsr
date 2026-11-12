@@ -17,7 +17,12 @@ export default async (page, { ok }) => {
   await page.waitForFunction(() => document.querySelector('#app h1').textContent === 'Hello, ADA!');
   ok(await text('.shouts') === 'Shouted 1 time.', 'Shout: name upper-cased, singular "time"');
 
+  await page.fill('#app input', 'Zoë');
+  await page.waitForFunction(() => document.querySelector('#app h1').textContent === 'Hello, Zoë!');
+  ok(squash(await text('.stats')).startsWith('3 characters'), 'counts characters, not UTF-8 bytes: Zoë is 3');
+
   await page.fill('#app input', 'Margaret Hamilton');
   await page.waitForFunction(() => document.querySelector('#app .stats b').textContent === 'long');
   ok(squash(await text('.stats')) === "17 characters, a long name — false that it's under six.", 'computed re-evaluates: long / false');
+
 };

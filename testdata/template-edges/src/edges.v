@@ -17,6 +17,9 @@ mut:
 	n     &Signal[int]      = signal(255)
 	code  &Signal[string]   = signal('x := 1')
 	type  string            = 'search'
+	css   &Signal[string]   = signal('teal')
+	word  &Signal[string]   = signal('')
+	log   &Signal[string]   = signal('')
 }
 
 fn (mut e Edges) toggle() {
@@ -27,4 +30,14 @@ fn (mut e Edges) add() {
 	mut xs := e.items.get().clone()
 	xs << 'c'
 	e.items.set(xs)
+}
+
+// typed runs on @input: @bind has already written the new value
+fn (mut e Edges) typed() {
+	e.log.set('typed ${e.word.get()}')
+}
+
+// go is named like a V keyword
+fn (mut e Edges) go(path string) {
+	e.msg.set(path)
 }

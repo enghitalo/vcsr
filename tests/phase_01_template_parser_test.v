@@ -409,3 +409,50 @@ fn test_parse_html_reads_a_skeleton_like_the_browser() {
 	ta := parser.parse_html('<div><textarea>\n<b>&amp;</b></textarea></div>') or { panic(err) }
 	assert ta.root.children[0].children[0].text == '<b>&</b>' // RCDATA: no tags
 }
+
+// --- second review of #15 -------------------------------------------------------
+
+fn test_html_written_in_capitals_is_html_not_a_component() {
+	r := parse('<div><P>Total: <B>{{ n }}</B></p><BR><Card/></div>').root
+	assert r.children.map(it.kind) == [NodeKind.element, .element, .component]
+	assert r.children[0].children[1].tag == 'B' && parser.is_void('BR')
+}
+
+fn test_raw_text_and_rcdata_bodies_are_text_with_interpolations() {
+	ta := parse('<div><textarea>Dear {{ name }},<br>thanks</textarea></div>').root.children[0]
+	assert ta.children.map(it.kind) == [NodeKind.text, .interpolation, .text]
+	assert ta.children[2].text == ',<br>thanks' && !ta.raw_text
+	st := parse('<div><style>p { color: {{ c }} } a > b {}</style></div>').root.children[0]
+	assert st.raw_text && st.children.map(it.kind) == [NodeKind.text, .interpolation, .text]
+	// inside svg/math they are ordinary elements (foreign content)
+	svg := parse('<div><svg><title><b>x</b></title><style>g > r {}</style></svg></div>').root.children[0]
+	assert svg.foreign && svg.children[0].children[0].tag == 'b' && !svg.children[1].raw_text
+	expect_error('<div><plaintext>x</div>', 'plaintext')
+}
+
+fn test_leading_newline_written_as_a_reference_is_dropped_too() {
+	assert parse('<pre>&#10;x</pre>').root.children[0].text == 'x'
+	assert parse('<pre>&NewLine;x</pre>').root.children[0].text == 'x'
+	assert parse('<pre>\n&#10;x</pre>').root.children[0].text == '&#10;x' // only the first
+}
+
+fn test_bang_dash_dash_ends_a_comment_and_a_bom_is_dropped() {
+	r := parse('<div><!-- a --!><b>x</b></div>').root
+	assert r.children.map(it.kind) == [NodeKind.comment, .element]
+	assert parse('\xef\xbb\xbf<div>x</div>').root.tag == 'div'
+}
+
+fn test_empty_interpolation_is_an_error() {
+	expect_error('<p>a {{ }} b</p>', 'empty {{ }}', 'line 1, col 6')
+}
+
+fn test_parse_html_folds_names_and_keeps_the_first_duplicate() {
+	t := parser.parse_html('<DIV><P tabIndex="0" a="1" a="2">x</P><keygen><svg viewBox="0 0 1 1"></svg></DIV>') or {
+		panic(err)
+	}
+	p := t.root.children[0]
+	assert t.root.tag == 'div' && p.tag == 'p'
+	assert p.attrs.map('${it.name}=${it.value}') == ['tabindex=0', 'a=1']
+	assert t.root.children[1].tag == 'keygen' && t.root.children[1].children.len == 0 // void
+	assert t.root.children[2].attrs[0].name == 'viewBox' // SVG keeps its case
+}

@@ -42,4 +42,15 @@
   <!-- #18: a component named like an HTML tag is not that tag; it leaves a
        mount anchor until child components render (roadmap 7) -->
   <nav class="comp"><Link to="/">Home</Link><b>after</b></nav>
+
+  <!-- second review: HTML in capitals is HTML; <textarea>/<style> bodies are
+       text a template may interpolate; @bind writes before @input runs; a
+       method named like a keyword, with ${x.get()}; a range @for; U+FEFF -->
+  <P class="caps">caps <B>{{ n }}</B></P>
+  <textarea class="ta2">Dear {{ first }},<br>thanks</textarea>
+  <style>.caps { color: {{ css }} }</style>
+  <input class="typed" @bind="word" @input="typed"><p class="log">{{ log }}</p>
+  <button class="go" @click="go('/about/${first.get()}')">go</button>
+  <ul class="range"><li @for="i in 0..n">{{ i }}</li></ul>
+  <p class="bom">&#xFEFF;{{ n }}</p>
 </main>

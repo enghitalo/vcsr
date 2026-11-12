@@ -28,4 +28,14 @@ export default async (page, { ok }) => {
 
   ok(await page.$eval('#app .ta', (e) => e.value) === 'x := 1', '#27: the textarea value has no leading newline');
   ok(await text('.ent') === await text('.ent-static'), '#21: references in a text slot read like static text');
+
+  // second review of #15
+  ok(await page.$eval('#app .caps', (e) => getComputedStyle(e).color) === 'rgb(0, 128, 128)',
+    'an interpolated <style> body applies; HTML in capitals is HTML');
+  ok(await page.$eval('#app .ta2', (e) => e.value) === 'Dear Margaret,<br>thanks', 'a <textarea> body is text, interpolated');
+  await page.fill('#app .typed', 'abc');
+  ok(await text('.log') === 'typed abc', '@bind writes the value before @input runs');
+  await page.click('#app .go');
+  ok(await text('.msg') === '/about/Margaret', "a keyword-named method; ${first.get()} isn't read twice");
+  ok(await page.$eval('#app .bom', (e) => e.textContent.codePointAt(0)) === 0xFEFF, 'a text slot keeps a leading U+FEFF');
 };

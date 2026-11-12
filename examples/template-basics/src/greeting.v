@@ -13,7 +13,7 @@ mut:
 
 // size is a computed: the template reads it as `{{ size }}`.
 fn (mut g Greeting) size() string {
-	n := g.name.get().len
+	n := g.name.get().runes().len // characters, not UTF-8 bytes
 	return if n < 6 {
 		'short'
 	} else if n < 12 {

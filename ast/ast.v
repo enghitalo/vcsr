@@ -85,6 +85,8 @@ pub mut:
 	props          []Prop         // props (components)
 	children       []Node
 	self_closing   bool
+	raw_text       bool // an element whose body HTML reads verbatim (script, style, …): no tags, no references
+	foreign        bool // <svg>/<math> or inside one: HTML's case folding and raw-text rules don't apply
 }
 
 // attr returns a static attribute's value, or an error if absent.

@@ -24,4 +24,6 @@ fn test_generated_greeting_renders_and_reacts() {
 
 	g.name.set('Margaret Hamilton')
 	assert dom.html().contains('17<!----> characters, a <b>long</b> name — false<!---->')
+	g.name.set('Zoë') // characters, not UTF-8 bytes
+	assert dom.html().contains('3<!----> characters, a <b>short</b> name')
 }

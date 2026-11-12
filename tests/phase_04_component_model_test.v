@@ -235,3 +235,64 @@ fn test_no_component_tag_survives_in_the_skeleton() {
 	assert c.tmpl.html == '<main><!----><!----><p>x</p></main>'
 	assert c.children == ['Link', 'Button']
 }
+
+// --- second review of #15 -------------------------------------------------------
+
+fn test_a_signal_is_read_unless_its_own_api_follows() {
+	// an explicit .get() is not doubled; a handler argument is the value; the
+	// signal stays a Signal before .set/.update/.get/.peek
+	src := greet_src('<div><p>{{ name.get() }}</p><button @click="name.set(\'Hi \${name.get()}, \${n}!\')">a</button><i @click="name.set(label())">b</i></div>')
+	assert src.contains('return runtime.to_str(g.name.get())')
+	assert src.contains("g.name.set('Hi \${g.name.get()}, \${g.n.get()}!')")
+	assert src.contains('g.name.set(g.label())')
+	assert !src.contains('.get().get()')
+	bind_src := greet_src('<input @bind="name">')
+	assert bind_src.contains('g.name.set(v)')
+}
+
+const kw_member_v = '
+@[component]
+struct Nav {
+mut:
+	match vcsr.Signal[string] = signal("final")
+	module string = "core"
+}
+fn (mut n Nav) go(p string) {}
+'
+
+fn test_members_named_like_hard_keywords_are_qualified() {
+	src := analyze(
+		v:    kw_member_v
+		html: '<div><p :title="module">{{ match }}</p><button @click="go(\'/about\')">x</button></div>'
+	)!.codegen()!.source
+	assert src.contains('runtime.to_str(n.module)')
+	assert src.contains('runtime.to_str(n.match.get())')
+	assert src.contains("n.go('/about')")
+}
+
+fn test_unknown_type_or_it_reference_is_a_vcsr_error() {
+	for html in ['<p :title="type">x</p>', '<p>{{ it }}</p>'] {
+		analyze(v: greet_v, html: html) or {
+			assert err.msg().contains('unknown reference'), err.msg()
+			continue
+		}
+		assert false, 'expected an error for ${html}'
+	}
+	// `it` inside filter/map is V's, not a reference
+	analyze(v: greet_v, html: '<p>{{ [1, 2].filter(it > n).len }}</p>')!
+}
+
+fn test_for_count_is_parenthesized_and_handles_ranges() {
+	range_src := greet_src('<ul><li @for="i in 0..n">{{ i }}</li></ul>')
+	assert range_src.contains('return if (g.n.get()) > (0) { (g.n.get()) - (0) } else { 0 }')
+	sum_src := greet_src('<ul><li @for="w in name.split(\' \') + [\'x\']">{{ w }}</li></ul>')
+	assert sum_src.contains("return (g.name.get().split(' ') + ['x']).len")
+}
+
+fn test_handler_value_is_trimmed() {
+	c := analyze(
+		v:    counter_v
+		html: '<main><button @click=" inc ">+</button></main>'
+	)!
+	assert c.codegen()!.source.contains('c.inc()')
+}

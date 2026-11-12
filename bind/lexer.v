@@ -54,6 +54,54 @@ pub fn is_soft_keyword(name string) bool {
 	return name in soft_keywords
 }
 
+// it_methods are V's array methods whose argument sees the element as `it`.
+const it_methods = ['filter', 'map', 'any', 'all', 'count']
+
+// soft_keyword_is_syntax reports whether the soft keyword at toks[i] is V syntax
+// there rather than a reference: a builtin type name called as a cast
+// (`int(x)`), or `it` inside the argument of filter/map/any/all/count.
+pub fn soft_keyword_is_syntax(toks []Token, i int) bool {
+	if toks[i].text != 'it' {
+		return toks[i].text != 'type' && next_is_call(toks, i)
+	}
+	mut depth := 0
+	for k := i - 1; k >= 0; k-- {
+		if toks[k].kind != .punct {
+			continue
+		}
+		if toks[k].text == ')' {
+			depth++
+		} else if toks[k].text == '(' {
+			if depth > 0 {
+				depth--
+				continue
+			}
+			for m := k - 1; m >= 0; m-- {
+				if toks[m].kind == .space {
+					continue
+				}
+				if toks[m].kind == .member && toks[m].text in it_methods {
+					return true
+				}
+				break
+			}
+		}
+	}
+	return false
+}
+
+// next_is_call reports whether the token after `i` (skipping spaces) opens a
+// call: `doubled ()`.
+pub fn next_is_call(toks []Token, i int) bool {
+	for k := i + 1; k < toks.len; k++ {
+		if toks[k].kind == .space {
+			continue
+		}
+		return toks[k].kind == .punct && toks[k].text == '('
+	}
+	return false
+}
+
 // tokens splits a template expression into lossless tokens (see the module doc).
 pub fn tokens(expr string) []Token {
 	mut out := []Token{}
@@ -75,14 +123,7 @@ fn lex_into(s string, from int, to int, mut out []Token) {
 			i = lex_string(s, i, to, mut out)
 		} else if c == `\`` {
 			start := i
-			i++
-			for i < to && s[i] != `\`` {
-				if s[i] == `\\` {
-					i++
-				}
-				i++
-			}
-			i = if i < to { i + 1 } else { to }
+			i = skip_quoted(s, i, to)
 			out << tok(.rune_lit, s[start..i])
 		} else if is_digit(c) {
 			start := i

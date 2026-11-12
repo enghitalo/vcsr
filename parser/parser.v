@@ -4,39 +4,62 @@
 //
 // HTML rules it follows: void elements (`<input>`, `<br>`, …) take no closing
 // tag; `<x/>` closes any element; text runs to the next tag, so a `<` that
-// doesn't start markup (`1 < 2`) and anything inside `{{ … }}` is text;
-// `<script>`/`<style>` bodies are raw text; newlines are normalized to LF, and
-// one right after `<pre>`/`<textarea>`/`<listing>` is dropped. These rules are
-// HTML's, so they apply to elements only: a PascalCase tag is a component
-// whatever its name (`<Link>` is not a void `<link>`). Whitespace is condensed
-// the way Vue's compiler does it (see condense), except inside
-// <pre>/<textarea>, so a pretty-printed template compiles to the same skeleton
-// as a one-line one. Errors carry `line L, col C`.
+// doesn't start markup (`1 < 2`) and anything inside `{{ … }}` is text; the
+// body of a raw-text element (`<script>`, `<style>`, …) or of `<textarea>`/
+// `<title>` is text (a template may still interpolate in it), never markup;
+// newlines are normalized to LF, and one right after `<pre>`/`<textarea>`/
+// `<listing>` is dropped. Inside `<svg>`/`<math>` (foreign content) those
+// element rules don't apply. They are HTML's rules, so they apply to elements
+// only: a PascalCase tag is a component whatever its name (`<Link>` is not a
+// void `<link>`), while HTML written in capitals (`<BR>`, `<TABLE>`) is HTML.
+// Whitespace is condensed the way Vue's compiler does it (see condense),
+// except inside <pre>/<textarea>/<listing>, so a pretty-printed template
+// compiles to the same skeleton as a one-line one. Errors carry `line L, col C`.
 //
 // parse_html parses a compiled SKELETON the way the browser does, for the
-// native mock DOM: no `{{ }}`, no directives, no whitespace condensing, and
-// character references decoded.
+// native mock DOM: no `{{ }}`, no directives, no whitespace condensing, tag and
+// attribute names lowercased (outside svg/math), the first of two same-named
+// attributes kept, and character references decoded.
 module parser
 
+import strings
 import vcsr.ast
 
-// void_elements never have children or a closing tag (HTML spec).
-pub const void_elements = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
-	'meta', 'param', 'source', 'track', 'wbr']
+// void_elements never have children or a closing tag (HTML spec, including the
+// legacy ones a browser still parses as void).
+pub const void_elements = ['area', 'base', 'basefont', 'bgsound', 'br', 'col', 'embed', 'frame',
+	'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']
 
-// raw_text_elements hold literal text: no tags, no interpolation, no condensing.
-const raw_text_elements = ['script', 'style']
+// raw_text_elements' bodies are literal text: no tags and no character
+// references (vcsr still reads `{{ }}` in them).
+pub const raw_text_elements = ['script', 'style', 'xmp', 'iframe', 'noembed', 'noframes']
 
-// rcdata_elements hold text with character references but no tags (HTML mode;
-// a template parses tags in them).
-const rcdata_elements = ['textarea', 'title']
+// rcdata_elements' bodies are text with character references, but no tags.
+pub const rcdata_elements = ['textarea', 'title']
 
-// preserve_ws_elements keep their whitespace verbatim.
-const preserve_ws_elements = ['pre', 'textarea', 'listing']
+// newline_elements drop a newline right after their start tag, and keep their
+// whitespace verbatim.
+pub const newline_elements = ['pre', 'textarea', 'listing']
+
+// html_elements are HTML's element names: written in capitals (`<BR>`), they
+// are still HTML, not components (HTML tag names are case-insensitive).
+const html_elements = ['a', 'abbr', 'acronym', 'address', 'area', 'article', 'aside', 'audio',
+	'b', 'base', 'basefont', 'bdi', 'bdo', 'bgsound', 'big', 'blink', 'blockquote', 'body', 'br',
+	'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist',
+	'dd', 'del', 'details', 'dfn', 'dialog', 'dir', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset',
+	'figcaption', 'figure', 'font', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4',
+	'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'image', 'img', 'input',
+	'ins', 'kbd', 'keygen', 'label', 'legend', 'li', 'link', 'listing', 'main', 'map', 'mark',
+	'marquee', 'math', 'menu', 'meta', 'meter', 'nav', 'nobr', 'noembed', 'noframes', 'noscript',
+	'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'plaintext', 'pre',
+	'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'script', 'search', 'section',
+	'select', 'slot', 'small', 'source', 'span', 'strike', 'strong', 'style', 'sub', 'summary',
+	'sup', 'svg', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time',
+	'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp']
 
 // is_void reports whether `tag` is an HTML void element (never a component).
 pub fn is_void(tag string) bool {
-	return !is_component_name(tag) && tag.to_lower() in void_elements
+	return !is_component_name(tag) && lower(tag) in void_elements
 }
 
 struct Parser {
@@ -44,7 +67,8 @@ struct Parser {
 	html bool // HTML mode (parse_html): a skeleton, read the way a browser reads it
 mut:
 	pos      int
-	preserve int // depth of <pre>/<textarea> ancestors: whitespace is kept inside them
+	preserve int // depth of <pre>/<textarea>/<listing> ancestors: whitespace is kept inside them
+	foreign  int // depth of <svg>/<math> ancestors (0 again inside <foreignObject>)
 }
 
 // parse_template parses the contents of a `.html` template file into a Tree
@@ -57,16 +81,21 @@ pub fn parse_template(tmpl string) !ast.Tree {
 
 // parse_html parses static HTML, a template's compiled skeleton, the way a
 // browser's HTML parser does: `{{` is text, every attribute is static, the
-// whitespace is kept as written, and character references in text and
-// attribute values are decoded. The native mock DOM is built from it.
+// whitespace is kept as written, names are lowercased, and character references
+// in text and attribute values are decoded. The native mock DOM is built from it.
 pub fn parse_html(src string) !ast.Tree {
 	return parse(src, true)
 }
 
 fn parse(src string, html bool) !ast.Tree {
+	// HTML decoding drops a UTF-8 BOM, and the input stream turns CRLF and a
+	// lone CR into LF
+	mut text := if src.starts_with('\xef\xbb\xbf') { src[3..] } else { src }
+	if text.contains_u8(`\r`) {
+		text = text.replace('\r\n', '\n').replace('\r', '\n')
+	}
 	mut p := Parser{
-		// the HTML input stream turns CRLF and a lone CR into LF
-		src:  src.replace('\r\n', '\n').replace('\r', '\n')
+		src:  text
 		html: html
 	}
 	p.skip_ws_and_comments()
@@ -89,14 +118,19 @@ fn (mut p Parser) parse_element() !ast.Node {
 	}
 	open := p.pos
 	p.pos++ // consume '<'
-	tag := p.read_name()
-	if tag == '' {
+	name := p.read_name()
+	if name == '' {
 		return error('expected a tag name at ${p.at(p.pos)}')
 	}
-	is_comp := is_component_name(tag)
+	is_comp := !p.html && is_component_name(name)
+	l := if is_comp { '' } else { lower(name) }
+	foreign := p.foreign > 0 || l in ['svg', 'math']
+	// the browser lowercases HTML tag names; a template keeps what was written
+	tag := if p.html && !foreign { l } else { name }
 	mut node := ast.Node{
-		kind: if is_comp { ast.NodeKind.component } else { ast.NodeKind.element }
-		tag:  tag
+		kind:    if is_comp { ast.NodeKind.component } else { ast.NodeKind.element }
+		tag:     tag
+		foreign: foreign
 	}
 
 	mut item_name := ''
@@ -114,7 +148,7 @@ fn (mut p Parser) parse_element() !ast.Node {
 			p.pos++
 			break
 		}
-		if c == `/` && p.pos + 1 < p.src.len && p.src[p.pos + 1] == `>` {
+		if c == `/` && p.has('/>') {
 			node.self_closing = true
 			p.pos += 2
 			break
@@ -125,20 +159,23 @@ fn (mut p Parser) parse_element() !ast.Node {
 			return error('malformed attribute in <${tag}> at ${p.at(p.pos)}')
 		}
 		mut aval := ''
-		mut has_value := false
 		p.skip_ws()
 		if p.pos < p.src.len && p.src[p.pos] == `=` {
 			p.pos++
 			p.skip_ws()
 			aval = p.read_attr_value()!
-			has_value = true
 		}
 
 		// classify the attribute
 		if p.html {
-			node.attrs << ast.Attr{
-				name:  aname
-				value: decode_attr_entities(aval)
+			// HTML lowercases attribute names, and keeps the first of two
+			// attributes with the same name
+			an := if foreign { aname } else { lower(aname) }
+			if !node.attrs.any(it.name == an) {
+				node.attrs << ast.Attr{
+					name:  an
+					value: decode_attr_entities(aval)
+				}
 			}
 		} else if aname.starts_with('@') {
 			rest := aname[1..]
@@ -162,13 +199,13 @@ fn (mut p Parser) parse_element() !ast.Node {
 				}
 			} else {
 				ev := rest.split('.')
-				if ev[0] == '' || !has_value || aval.trim_space() == '' {
+				if ev[0] == '' || aval.trim_space() == '' {
 					return error('event ${aname} on <${tag}> needs a handler, e.g. ${aname}="method", at ${p.at(apos)}')
 				}
 				node.events << ast.Event{
 					name:         ev[0]
 					modifiers:    if ev.len > 1 { ev[1..] } else { []string{} }
-					handler_expr: aval
+					handler_expr: aval.trim_space()
 				}
 			}
 		} else if aname.starts_with('class:') {
@@ -222,19 +259,29 @@ fn (mut p Parser) parse_element() !ast.Node {
 		}
 	}
 
-	if node.self_closing || is_void(tag) {
+	if node.self_closing || (!is_comp && l in void_elements) {
 		return node
 	}
-	// HTML's content rules are for elements; a component's children are
+	// HTML's content rules are for HTML elements; a component's children are
 	// template content whatever the component is called
-	lower := if is_comp { '' } else { tag.to_lower() }
-	keep := lower in preserve_ws_elements
-	if keep && p.starts_with('\n') {
-		p.pos++ // HTML drops a newline right after <pre>/<textarea>/<listing>
+	html_rules := !is_comp && !foreign
+	if html_rules && l == 'plaintext' {
+		return error('<plaintext> at ${p.at(open)} is not supported: it turns the rest of the page into text')
 	}
-	if lower in raw_text_elements || (p.html && lower in rcdata_elements) {
-		p.parse_raw_text(mut node, open)!
+	keep := html_rules && l in newline_elements
+	if keep {
+		p.drop_leading_newline()
+	}
+	if html_rules && (l in raw_text_elements || l in rcdata_elements) {
+		node.raw_text = l in raw_text_elements
+		p.parse_text_body(mut node, open)!
 		return node
+	}
+	saved := p.foreign
+	if l in ['svg', 'math'] {
+		p.foreign++
+	} else if foreign && l == 'foreignobject' {
+		p.foreign = 0 // its children are HTML again
 	}
 	if keep {
 		p.preserve++
@@ -243,7 +290,25 @@ fn (mut p Parser) parse_element() !ast.Node {
 	if keep {
 		p.preserve--
 	}
+	p.foreign = saved
 	return node
+}
+
+// drop_leading_newline skips the newline right after a <pre>/<textarea>/
+// <listing> start tag, as HTML does — also one written as a character
+// reference (`&#10;`).
+fn (mut p Parser) drop_leading_newline() {
+	if p.pos >= p.src.len {
+		return
+	}
+	if p.src[p.pos] == `\n` {
+		p.pos++
+	} else if p.src[p.pos] == `&` {
+		text, next := char_ref(p.src, p.pos, false)
+		if text == '\n' {
+			p.pos = next
+		}
+	}
 }
 
 // split_for splits an @for value `item in source` around the first `in` with
@@ -259,7 +324,7 @@ fn split_for(v string) ?(string, string) {
 	for i < t.len && is_ws(t[i]) {
 		i++
 	}
-	if !is_ident(item) || !t[i..].starts_with('in') || i + 2 >= t.len || !is_ws(t[i + 2]) {
+	if !item.is_identifier() || !has_at(t, i, 'in') || i + 2 >= t.len || !is_ws(t[i + 2]) {
 		return none
 	}
 	source := t[i + 2..].trim_space()
@@ -274,42 +339,26 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 		if p.pos >= p.src.len {
 			return error('unclosed tag <${parent.tag}> opened at ${p.at(open)}')
 		}
-		// text runs to the next tag: skip over {{ … }} (it may contain `<`) and
-		// any `<` that doesn't start markup (`a < b`); HTML has no {{ }}
-		start := p.pos
-		for p.pos < p.src.len {
-			if !p.html && (p.starts_with('{{{{') || p.starts_with('}}}}')) {
-				p.pos += 4
-				continue
+		// text runs to the next tag
+		if p.html {
+			start := p.pos
+			for p.pos < p.src.len && !(p.src[p.pos] == `<` && p.starts_markup()) {
+				p.pos++
 			}
-			if !p.html && p.starts_with('{{') {
-				close := p.find('}}', p.pos + 2)
-				if close < 0 {
-					return error('unterminated {{ at ${p.at(p.pos)} (missing }})')
-				}
-				p.pos = close + 2
-				continue
-			}
-			if p.src[p.pos] == `<` && p.starts_markup() {
-				break
-			}
-			p.pos++
-		}
-		if p.pos > start {
-			if p.html {
+			if p.pos > start {
 				parent.children << ast.Node{
 					kind: .text
 					text: decode_entities(p.src[start..p.pos])
 				}
-			} else {
-				flush_text(mut parent, p.src[start..p.pos])
 			}
+		} else {
+			p.read_text(mut parent, -1)!
 		}
 		if p.pos >= p.src.len {
 			return error('unclosed tag <${parent.tag}> opened at ${p.at(open)}')
 		}
 		// at '<'
-		if p.starts_with('<!--') {
+		if p.has('<!--') {
 			text := p.read_comment()
 			parent.children << ast.Node{
 				kind: .comment
@@ -317,7 +366,7 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 			}
 			continue
 		}
-		if p.starts_with('</') {
+		if p.has('</') {
 			cpos := p.pos
 			p.pos += 2
 			cname := p.read_name()
@@ -326,11 +375,16 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 				return error('unclosed closing tag for <${parent.tag}> at ${p.at(cpos)}')
 			}
 			p.pos++
-			if cname != parent.tag {
+			same := if parent.kind == .component {
+				cname == parent.tag
+			} else {
+				lower(cname) == lower(parent.tag)
+			}
+			if !same {
 				return error('mismatched closing tag </${cname}> at ${p.at(cpos)}, expected </${parent.tag}> (opened at ${p.at(open)})')
 			}
 			if p.preserve == 0 && !p.html {
-				parent.children = condense(parent.children)
+				condense(mut parent.children)
 			}
 			return
 		}
@@ -339,22 +393,81 @@ fn (mut p Parser) parse_children(mut parent ast.Node, open int) ! {
 	}
 }
 
-// parse_raw_text reads a <script>/<style> body verbatim up to its closing tag
-// (in HTML mode also a <textarea>/<title> body, whose references are decoded).
-fn (mut p Parser) parse_raw_text(mut node ast.Node, open int) ! {
-	close := '</' + node.tag
-	end := p.find(close, p.pos)
+// read_text reads template text from pos up to `to` (or, when `to` < 0, up to
+// the next markup), adding literal text and `{{ expr }}` interpolation nodes to
+// `parent`. `{{{{` and `}}}}` are literal braces; anything inside `{{ }}`,
+// even a `<`, belongs to the expression.
+fn (mut p Parser) read_text(mut parent ast.Node, to int) ! {
+	limit := if to >= 0 { to } else { p.src.len }
+	mut lit := strings.new_builder(32)
+	mut seg := p.pos
+	for p.pos < limit {
+		if p.has('{{{{') || p.has('}}}}') {
+			lit.write_string(p.src[seg..p.pos])
+			lit.write_string(p.src[p.pos..p.pos + 2])
+			p.pos += 4
+			seg = p.pos
+			continue
+		}
+		if p.has('{{') {
+			close := index_of(p.src, '}}', p.pos + 2)
+			if close < 0 || close + 2 > limit {
+				return error('unterminated {{ at ${p.at(p.pos)} (missing }})')
+			}
+			expr := p.src[p.pos + 2..close].trim_space()
+			if expr == '' {
+				return error('empty {{ }} at ${p.at(p.pos)}')
+			}
+			lit.write_string(p.src[seg..p.pos])
+			if lit.len > 0 {
+				parent.children << ast.Node{
+					kind: .text
+					text: lit.str()
+				}
+			}
+			parent.children << ast.Node{
+				kind: .interpolation
+				expr: expr
+			}
+			p.pos = close + 2
+			seg = p.pos
+			continue
+		}
+		if to < 0 && p.src[p.pos] == `<` && p.starts_markup() {
+			break
+		}
+		p.pos++
+	}
+	lit.write_string(p.src[seg..p.pos])
+	if lit.len > 0 {
+		parent.children << ast.Node{
+			kind: .text
+			text: lit.str()
+		}
+	}
+}
+
+// parse_text_body reads the body of a raw-text (<script>, <style>, …) or RCDATA
+// (<textarea>, <title>) element up to its end tag: text, never markup. A
+// template may interpolate in it; HTML mode decodes an RCDATA body's
+// references and keeps a raw-text body as written.
+fn (mut p Parser) parse_text_body(mut node ast.Node, open int) ! {
+	end := p.find_end_tag(node.tag)
 	if end < 0 {
 		return error('unclosed tag <${node.tag}> opened at ${p.at(open)}')
 	}
-	if end > p.pos {
-		text := p.src[p.pos..end]
-		node.children << ast.Node{
-			kind: .text
-			text: if node.tag.to_lower() in rcdata_elements { decode_entities(text) } else { text }
+	if p.html {
+		if end > p.pos {
+			body := p.src[p.pos..end]
+			node.children << ast.Node{
+				kind: .text
+				text: if node.raw_text { body } else { decode_entities(body) }
+			}
 		}
+	} else {
+		p.read_text(mut node, end)!
 	}
-	p.pos = end + close.len
+	p.pos = end + 2 + node.tag.len
 	p.skip_ws()
 	if p.pos >= p.src.len || p.src[p.pos] != `>` {
 		return error('unclosed closing tag for <${node.tag}> at ${p.at(end)}')
@@ -362,39 +475,53 @@ fn (mut p Parser) parse_raw_text(mut node ast.Node, open int) ! {
 	p.pos++
 }
 
-// condense applies Vue's "condense" whitespace rule to one element's children:
-// a whitespace-only text node is removed when it is the first or last child,
-// or sits between two elements/comments and contains a newline; otherwise it
-// becomes a single space. Other text has its whitespace runs collapsed to one
-// space. So indentation between tags vanishes, while `a <b>x</b> c` keeps its
-// spaces.
-fn condense(children []ast.Node) []ast.Node {
-	mut out := []ast.Node{cap: children.len}
-	for i, ch in children {
-		if ch.kind != .text {
-			out << ch
+// find_end_tag finds the `</tag` (any case) that ends a raw-text or RCDATA
+// body: one followed by whitespace, `/` or `>`.
+fn (p &Parser) find_end_tag(tag string) int {
+	mut i := p.pos
+	for {
+		i = index_of(p.src, '</', i)
+		if i < 0 {
+			return -1
+		}
+		j := i + 2 + tag.len
+		if j <= p.src.len && lower(p.src[i + 2..j]) == lower(tag)
+			&& (j == p.src.len || is_ws(p.src[j]) || p.src[j] == `/` || p.src[j] == `>`) {
+			return i
+		}
+		i += 2
+	}
+	return -1
+}
+
+// condense applies Vue's "condense" whitespace rule to one element's children,
+// in place: a whitespace-only text node is removed when it is the first or last
+// child, or sits between two elements/comments and contains a newline;
+// otherwise it becomes a single space. Other text has its whitespace runs
+// collapsed to one space. So indentation between tags vanishes, while
+// `a <b>x</b> c` keeps its spaces.
+fn condense(mut children []ast.Node) {
+	mut i := 0
+	for i < children.len {
+		if children[i].kind != .text {
+			i++
 			continue
 		}
-		if is_blank(ch.text) {
+		if is_blank(children[i].text) {
 			first := i == 0
 			last := i == children.len - 1
 			between_tags := !first && !last && is_tag_like(children[i - 1])
 				&& is_tag_like(children[i + 1])
-			if first || last || (between_tags && ch.text.contains_any('\n\r')) {
+			if first || last || (between_tags && children[i].text.contains_u8(`\n`)) {
+				children.delete(i)
 				continue
 			}
-			out << ast.Node{
-				kind: .text
-				text: ' '
-			}
-			continue
+			children[i].text = ' '
+		} else {
+			children[i].text = collapse_ws(children[i].text)
 		}
-		out << ast.Node{
-			kind: .text
-			text: collapse_ws(ch.text)
-		}
+		i++
 	}
-	return out
 }
 
 fn is_tag_like(n ast.Node) bool {
@@ -427,51 +554,6 @@ fn collapse_ws(s string) string {
 	return out.bytestr()
 }
 
-// flush_text splits raw text into .text and .interpolation child nodes,
-// handling `{{ expr }}` and the `{{{{` / `}}}}` literal-brace escapes. (The
-// caller has already checked every `{{` is terminated.)
-fn flush_text(mut parent ast.Node, raw string) {
-	mut out := ''
-	mut i := 0
-	mut seg := 0
-	for i < raw.len {
-		if i + 4 <= raw.len && raw[i..i + 4] == '{{{{' {
-			out += raw[seg..i] + '{{'
-			i += 4
-			seg = i
-		} else if i + 4 <= raw.len && raw[i..i + 4] == '}}}}' {
-			out += raw[seg..i] + '}}'
-			i += 4
-			seg = i
-		} else if i + 2 <= raw.len && raw[i..i + 2] == '{{' {
-			out += raw[seg..i]
-			if out.len > 0 {
-				parent.children << ast.Node{
-					kind: .text
-					text: out
-				}
-				out = ''
-			}
-			close := index_of(raw, '}}', i + 2)
-			parent.children << ast.Node{
-				kind: .interpolation
-				expr: raw[i + 2..close].trim_space()
-			}
-			i = close + 2
-			seg = i
-		} else {
-			i++
-		}
-	}
-	out += raw[seg..]
-	if out.len > 0 {
-		parent.children << ast.Node{
-			kind: .text
-			text: out
-		}
-	}
-}
-
 // --- lexical helpers --------------------------------------------------------
 
 // starts_markup reports whether the `<` at pos begins a tag, closing tag or
@@ -481,7 +563,7 @@ fn (p &Parser) starts_markup() bool {
 		return false
 	}
 	n := p.src[p.pos + 1]
-	return (n >= `a` && n <= `z`) || (n >= `A` && n <= `Z`) || n == `/` || n == `!`
+	return n.is_letter() || n == `/` || n == `!`
 }
 
 // at renders a byte offset as `line L, col C` (1-based) for error messages.
@@ -509,7 +591,7 @@ fn (mut p Parser) skip_ws_and_comments() {
 	for p.pos < p.src.len {
 		if is_ws(p.src[p.pos]) {
 			p.pos++
-		} else if p.starts_with('<!--') {
+		} else if p.has('<!--') {
 			p.read_comment()
 		} else {
 			break
@@ -518,31 +600,33 @@ fn (mut p Parser) skip_ws_and_comments() {
 }
 
 // read_comment consumes the comment at pos (`<!--`) and returns its text. Like
-// HTML, `<!-->` and `<!--->` are empty comments, and one with no `-->` runs to
-// the end.
+// HTML, `<!-->` and `<!--->` are empty comments, `--!>` ends one as `-->` does,
+// and one with no end runs to the end.
 fn (mut p Parser) read_comment() string {
 	body := p.pos + 4
 	for abrupt in ['>', '->'] {
-		if p.src[body..].starts_with(abrupt) {
+		if has_at(p.src, body, abrupt) {
 			p.pos = body + abrupt.len
 			return ''
 		}
 	}
-	end := p.find('-->', body)
-	if end < 0 {
-		p.pos = p.src.len
-		return p.src[body..]
+	for i := body; i < p.src.len; i++ {
+		for close in ['-->', '--!>'] {
+			if has_at(p.src, i, close) {
+				p.pos = i + close.len
+				return p.src[body..i]
+			}
+		}
 	}
-	p.pos = end + 3
-	return p.src[body..end]
+	p.pos = p.src.len
+	return p.src[body..]
 }
 
 fn (mut p Parser) read_name() string {
 	start := p.pos
 	for p.pos < p.src.len {
 		c := p.src[p.pos]
-		if (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`)
-			|| c == `-` || c == `_` {
+		if c.is_alnum() || c == `-` || c == `_` {
 			p.pos++
 		} else {
 			break
@@ -587,7 +671,7 @@ fn (mut p Parser) read_attr_value() !string {
 	start := p.pos
 	for p.pos < p.src.len {
 		c := p.src[p.pos]
-		if is_ws(c) || c == `>` || (c == `/` && p.pos + 1 < p.src.len && p.src[p.pos + 1] == `>`) {
+		if is_ws(c) || c == `>` || (c == `/` && p.has('/>')) {
 			break
 		}
 		p.pos++
@@ -595,41 +679,51 @@ fn (mut p Parser) read_attr_value() !string {
 	return p.src[start..p.pos]
 }
 
-fn (p &Parser) starts_with(s string) bool {
-	return p.pos + s.len <= p.src.len && p.src[p.pos..p.pos + s.len] == s
+// has reports whether the source continues with `s` at pos (without copying).
+fn (p &Parser) has(s string) bool {
+	return has_at(p.src, p.pos, s)
 }
 
-fn (p &Parser) find(sub string, from int) int {
-	return index_of(p.src, sub, from)
-}
-
-fn index_of(s string, sub string, from int) int {
-	mut i := from
-	for i + sub.len <= s.len {
-		if s[i..i + sub.len] == sub {
-			return i
-		}
-		i++
-	}
-	return -1
-}
-
-fn is_ws(c u8) bool {
-	return c == ` ` || c == `\t` || c == `\n` || c == `\r`
-}
-
-fn is_ident(s string) bool {
-	if s == '' || !((s[0] >= `a` && s[0] <= `z`) || (s[0] >= `A` && s[0] <= `Z`) || s[0] == `_`) {
+fn has_at(s string, i int, sub string) bool {
+	if i < 0 || i + sub.len > s.len {
 		return false
 	}
-	for c in s {
-		if !((c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) || c == `_`) {
+	for k in 0 .. sub.len {
+		if s[i + k] != sub[k] {
 			return false
 		}
 	}
 	return true
 }
 
+fn index_of(s string, sub string, from int) int {
+	for i := from; i + sub.len <= s.len; i++ {
+		if has_at(s, i, sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+// lower is `s.to_lower()` without the copy when `s` has no capitals.
+fn lower(s string) string {
+	for c in s {
+		if c >= `A` && c <= `Z` {
+			return s.to_lower()
+		}
+	}
+	return s
+}
+
+fn is_ws(c u8) bool {
+	return c == ` ` || c == `\t` || c == `\n` || c == `\r`
+}
+
+// is_component_name: a tag that starts with a capital names a component, except
+// an HTML element name written in capitals (`<BR>`, `<TD>`), which is HTML.
 fn is_component_name(tag string) bool {
-	return tag.len > 0 && tag[0] >= `A` && tag[0] <= `Z`
+	if tag.len == 0 || tag[0] < `A` || tag[0] > `Z` {
+		return false
+	}
+	return !(tag.to_upper() == tag && tag.to_lower() in html_elements)
 }

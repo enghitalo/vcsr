@@ -11,7 +11,7 @@ import vcsr.ast
 import vcsr.parser
 
 pub enum SlotKind {
-	text  // patch the target element's textContent
+	text  // patch an element's textContent, or the text node at an anchor
 	attr  // patch an attribute (`name`)
 	event // addEventListener(`name`)
 	bind  // two-way bind to `target_expr`
@@ -43,7 +43,7 @@ pub mut:
 	path        []int // element-child-index path from the clone root
 	anchor      int = -1 // >= 0: the slot is the container's anchor-th comment child
 	name        string           // attr/event name
-	expr        string           // driving expression: a sole text interpolation, or :attr value
+	expr        string           // :attr expression
 	parts       []TextPart       // text slots: literal text + expressions, concatenated
 	target_expr string           // @bind target
 	cond_expr   string           // @if condition
@@ -66,11 +66,17 @@ pub mut:
 }
 
 // compile turns a parsed template Tree into its static skeleton + slot table.
+// The root is what the runtime clones and mounts, so it must be a plain HTML
+// element: not a component, and not conditional or repeated.
 pub fn compile(tree ast.Tree) !CompiledTemplate {
-	if tree.root.kind == .component {
-		return error('the root of a template must be an HTML element, not the component <${tree.root.tag}>: wrap it in one')
+	root := tree.root
+	if root.kind == .component {
+		return error('the root of a template must be an HTML element, not the component <${root.tag}>: wrap it in one')
 	}
-	return compile_node(tree.root)!
+	if root.cond != none || root.each != none {
+		return error('the root element <${root.tag}> of a template cannot have @if or @for: wrap it in an element')
+	}
+	return compile_node(root)!
 }
 
 fn compile_node(root ast.Node) !CompiledTemplate {
@@ -92,7 +98,15 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 	for a in node.attrs {
 		s += ' ${a.name}="${a.value.replace('"', '&quot;')}"'
 	}
-	// the node's own dynamic bindings become slots keyed to this element
+	// the node's own dynamic bindings become slots keyed to this element; @bind
+	// first, so its writer runs before an @input handler on the same element
+	if b := node.binding {
+		sl << SlotDesc{
+			kind:        .bind
+			path:        path.clone()
+			target_expr: b.target_expr
+		}
+	}
 	for ev in node.events {
 		sl << SlotDesc{
 			kind:      .event
@@ -102,18 +116,12 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 			modifiers: ev.modifiers
 		}
 	}
-	if b := node.binding {
-		sl << SlotDesc{
-			kind:        .bind
-			path:        path.clone()
-			target_expr: b.target_expr
-		}
-	}
 	for ab in node.attr_bindings {
 		sl << SlotDesc{
 			kind: .attr
 			path: path.clone()
-			name: ab.name
+			// setAttribute lowercases an HTML attribute's name; SVG's keep their case
+			name: if node.foreign { ab.name } else { ab.name.to_lower() }
 			expr: ab.expr
 		}
 	}
@@ -122,6 +130,8 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 	if parser.is_void(node.tag) {
 		return s // void elements have no children and no closing tag
 	}
+	tag := node.tag.to_lower()
+	first_slot := sl.len
 	children := node.children.filter(it.kind != .comment) // user comments don't ship
 	has_interp := children.any(it.kind == .interpolation)
 	only_text := children.all(it.kind in [.text, .interpolation])
@@ -133,9 +143,12 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 			parts << TextPart{
 				is_expr: ch.kind == .interpolation
 				// literal text is set via textContent, which doesn't decode
-				// entities the way the skeleton's HTML parse does — decode here
+				// references the way the skeleton's HTML parse does — decode
+				// here (a raw-text body has none)
 				text:    if ch.kind == .interpolation {
 					ch.expr
+				} else if node.raw_text {
+					ch.text
 				} else {
 					parser.decode_entities(ch.text)
 				}
@@ -144,84 +157,71 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 		sl << SlotDesc{
 			kind:  .text
 			path:  path.clone()
-			expr:  if children.len == 1 { children[0].expr } else { '' }
 			parts: parts
 		}
 	} else {
 		mut ei := 0 // element-child index (text/anchors don't advance it)
 		mut ai := 0 // anchor index among this element's comment children
-		if node.tag in preserve_newline_elements && children.len > 0
-			&& children[0].kind == .text && children[0].text.starts_with('\n') {
+		if !node.foreign && tag in parser.newline_elements && children.len > 0
+			&& children[0].kind == .text
+			&& parser.decode_entities(children[0].text).starts_with('\n') {
 			// the browser drops a newline right after the start tag, as the
 			// parser did; write one more, so the one the author kept survives
 			s += '\n'
 		}
 		for child in children {
-			match child.kind {
-				.text {
-					// a `<` that is text here could be markup to the browser
-					// (`<?xml` is a bogus comment there, shifting the anchors);
-					// <script>/<style> bodies are raw text, written as is
-					s += if node.tag in raw_text_elements {
-						child.text
-					} else {
-						child.text.replace('<', '&lt;')
-					}
-				}
-				.comment {}
-				.interpolation {
-					// beside element children: its own text node, at an anchor
-					sl << SlotDesc{
-						kind:   .text
-						path:   path.clone()
-						anchor: ai
-						expr:   child.expr
-						parts:  [TextPart{
-							is_expr: true
-							text:    child.expr
-						}]
-					}
-					s += anchor_html
-					ai++
-				}
-				.element, .component {
-					if ea := child.each {
-						// @for: the row repeats; the slot lives on the container
-						row := compile_node(strip_each(child))!
-						sl << SlotDesc{
-							kind:        .list
-							path:        path.clone()
-							anchor:      ai
-							source_expr: ea.source_expr
-							key_expr:    ea.key_expr
-							row:         row
-						}
-						s += anchor_html
-						ai++
-					} else if c := child.cond {
-						// @if: leave an anchor; row is the conditional content
-						row := compile_node(strip_cond(child))!
-						sl << SlotDesc{
-							kind:      .cond
-							path:      path.clone()
-							anchor:    ai
-							cond_expr: c.expr
-							row:       row
-						}
-						s += anchor_html
-						ai++
-					} else if child.kind == .component {
-						s += anchor_html // where it mounts (roadmap 7); see anchor_html
-						ai++
-					} else {
-						mut cp := path.clone()
-						cp << ei
-						s += serialize(child, cp, mut sl)!
-						ei++
-					}
-				}
+			if child.kind == .text {
+				// a `<` that is text here could be markup to the browser
+				// (`<?xml` is a bogus comment there, shifting the anchors); a
+				// raw-text body is written as is
+				s += if node.raw_text { child.text } else { child.text.replace('<', '&lt;') }
+				continue
 			}
+			if child.kind == .element && child.each == none && child.cond == none {
+				mut cp := path.clone()
+				cp << ei
+				s += serialize(child, cp, mut sl)!
+				ei++
+				continue
+			}
+			// everything else leaves an anchor comment: an interpolation beside
+			// elements (its own text node), @for, @if, and a child component
+			if child.kind == .interpolation {
+				sl << SlotDesc{
+					kind:   .text
+					path:   path.clone()
+					anchor: ai
+					parts:  [TextPart{
+						is_expr: true
+						text:    child.expr
+					}]
+				}
+			} else if ea := child.each {
+				// @for: the row repeats at the anchor
+				sl << SlotDesc{
+					kind:        .list
+					path:        path.clone()
+					anchor:      ai
+					source_expr: ea.source_expr
+					key_expr:    ea.key_expr
+					row:         compile_node(strip_each(child))!
+				}
+			} else if c := child.cond {
+				// @if: the row is the conditional content
+				sl << SlotDesc{
+					kind:      .cond
+					path:      path.clone()
+					anchor:    ai
+					cond_expr: c.expr
+					row:       compile_node(strip_cond(child))!
+				}
+			} // a component: where it mounts (roadmap 7); see anchor_html
+			s += anchor_html
+			ai++
 		}
+	}
+	if tag == 'template' && sl.len > first_slot {
+		return error('<template> cannot hold bindings: the browser parses its content into an inert fragment the runtime cannot reach')
 	}
 
 	s += '</' + node.tag + '>'
@@ -239,9 +239,3 @@ fn strip_cond(node ast.Node) ast.Node {
 	c.cond = none
 	return c
 }
-
-// preserve_newline_elements: HTML drops a newline right after their start tag.
-const preserve_newline_elements = ['pre', 'textarea', 'listing']
-
-// raw_text_elements: HTML reads their bodies verbatim (no tags, no references).
-const raw_text_elements = ['script', 'style']

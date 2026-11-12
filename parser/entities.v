@@ -32,18 +32,14 @@ const c1_remap = [u32(0x20AC), 0, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021
 	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0, 0x017E, 0x0178]
 
 fn decode_refs(s string, in_attr bool) string {
-	if !s.contains('&') {
+	if !s.contains_u8(`&`) {
 		return s
 	}
 	mut out := strings.new_builder(s.len)
 	mut i := 0
 	for i < s.len {
 		if s[i] == `&` {
-			text, next := if i + 1 < s.len && s[i + 1] == `#` {
-				numeric_ref(s, i)
-			} else {
-				named_ref(s, i, in_attr)
-			}
+			text, next := char_ref(s, i, in_attr)
 			if next > i {
 				out.write_string(text)
 				i = next
@@ -56,31 +52,56 @@ fn decode_refs(s string, in_attr bool) string {
 	return out.str()
 }
 
-// named_ref decodes the named reference at s[i] (an `&`) and returns it with the
-// index after it, or ('', i) when there is none: the longest name in the table
+// char_ref decodes the character reference at s[i] (an `&`) and returns it with
+// the index after it, or ('', i) when there is none there.
+fn char_ref(s string, i int, in_attr bool) (string, int) {
+	return if i + 1 < s.len && s[i + 1] == `#` {
+		numeric_ref(s, i)
+	} else {
+		named_ref(s, i, in_attr)
+	}
+}
+
+// named_ref decodes the named reference at s[i]: the longest name in the table
 // that matches wins, and only a legacy name may go without its `;`.
 fn named_ref(s string, i int, in_attr bool) (string, int) {
 	mut j := i + 1
-	for j < s.len && j - i <= max_entity_len && is_alnum(s[j]) {
+	for j < s.len && j - i <= max_entity_len && s[j].is_alnum() {
 		j++
 	}
 	if j < s.len && s[j] == `;` {
-		v := html5_entities[s[i + 1..j + 1]] or { '' }
+		v := entity_value(s[i + 1..j + 1])
 		if v != '' {
 			return v, j + 1
 		}
 	}
-	for k := j; k > i + 1; k-- {
-		v := html5_entities[s[i + 1..k]] or { '' }
+	mut k := if j - i - 1 > max_legacy_entity_len { i + 1 + max_legacy_entity_len } else { j }
+	for ; k > i + 1; k-- {
+		v := entity_value(s[i + 1..k])
 		if v == '' {
 			continue
 		}
-		if in_attr && k < s.len && (s[k] == `=` || is_alnum(s[k])) {
+		if in_attr && k < s.len && (s[k] == `=` || s[k].is_alnum()) {
 			break
 		}
 		return v, k
 	}
 	return '', i
+}
+
+// entity_value looks `name` up in the sorted table; '' when it isn't there.
+fn entity_value(name string) string {
+	mut lo := 0
+	mut hi := entity_names.len
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if entity_names[mid] < name {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return if lo < entity_names.len && entity_names[lo] == name { entity_values[lo] } else { '' }
 }
 
 // numeric_ref decodes the `&#…` at s[i] (`&#169;`, `&#xA9`, the `;` is
@@ -94,13 +115,10 @@ fn numeric_ref(s string, i int) (string, int) {
 	}
 	start := j
 	mut cp := u32(0)
-	for j < s.len {
-		d := digit_value(s[j], hex)
-		if d < 0 {
-			break
-		}
+	for j < s.len && (if hex { s[j].is_hex_digit() } else { s[j].is_digit() }) {
 		if cp <= 0x10FFFF { // past that it stays invalid; stop before it overflows
-			cp = cp * (if hex { u32(16) } else { u32(10) }) + u32(d)
+			d := if s[j].is_digit() { u32(s[j] - `0`) } else { u32((s[j] | 0x20) - `a` + 10) }
+			cp = cp * (if hex { u32(16) } else { u32(10) }) + d
 		}
 		j++
 	}
@@ -117,21 +135,4 @@ fn numeric_ref(s string, i int) (string, int) {
 		return rune(c1_remap[cp - 0x80]).str(), j
 	}
 	return rune(cp).str(), j
-}
-
-fn digit_value(c u8, hex bool) int {
-	if c >= `0` && c <= `9` {
-		return int(c - `0`)
-	}
-	if hex && c >= `a` && c <= `f` {
-		return int(c - `a`) + 10
-	}
-	if hex && c >= `A` && c <= `F` {
-		return int(c - `A`) + 10
-	}
-	return -1
-}
-
-fn is_alnum(c u8) bool {
-	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`)
 }

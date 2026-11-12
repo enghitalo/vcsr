@@ -9,8 +9,8 @@
   </label>
 
   <p class="stats">
-    {{ name.len }} characters, a <b>{{ size }}</b> name
-    &mdash; {{ name.len < 6 }} that it's under six.
+    {{ name.runes().len }} characters, a <b>{{ size }}</b> name
+    &mdash; {{ name.runes().len < 6 }} that it's under six.
   </p>
 
   <p class="shouts">{{ 'Shouted ${shouts} time' + if shouts == 1 { '' } else { 's' } }}.</p>

@@ -2,8 +2,10 @@
 //
 // An in-memory mock DOM (`Node` tree), so the whole engine is testable without a
 // browser. It reads a skeleton the way the browser does (parser.parse_html:
-// references decoded, whitespace as written) and html() serializes the tree the
-// way the browser's innerHTML does, so a native test sees what Chrome shows.
+// references decoded, whitespace as written, names lowercased) and html()
+// serializes a view the way the browser's outerHTML does, so a native test sees
+// what Chrome shows. A slot path or anchor the browser couldn't resolve panics
+// here too.
 // `instance()` clones the skeleton; bind_*(_ctx) wire each slot to a reactive
 // effect; html() serializes.
 // The wasm backend (backend_wasm_d_wasm_browser.v) presents the SAME public API
@@ -32,12 +34,13 @@ mut:
 	tag        string
 	text       string // text/comment content
 	attrs      map[string]string
-	value      string           // form value (two-way bind)
-	children   []&Node          // ordered: text, comment and element nodes
-	on         map[string]fn () // event name → handler (closure form, native)
+	raw        bool               // a raw-text element (script, style, …): html() writes its text as is
+	value      string             // form value (two-way bind)
+	children   []&Node            // ordered: text, comment and element nodes
+	on         map[string][]fn () // event name → handlers, in order (closure form, native)
 	on_input   fn (v string) = unsafe { nil } // two-way input writer (closure form, native)
 	// closure-FREE handler slots (what codegen emits; wasm-safe — see signal.v):
-	on_ctx       map[string]EvtHandler // event name → (top-level fn + ctx)
+	on_ctx       map[string][]EvtHandler // event name → (top-level fn + ctx), in order
 	on_input_ctx &InputHandler = unsafe { nil } // two-way writer (top-level fn + ctx)
 }
 
@@ -146,7 +149,9 @@ pub fn bind_attr(mut ins Instance, i int, name string, get fn () string) {
 pub fn bind_event(mut ins Instance, i int, handler fn ()) {
 	name := ins.descs[i].name
 	mut node := ins.slots[i]
-	node.on[name] = handler
+	mut hs := node.on[name] or { []fn (){} }
+	hs << handler
+	node.on[name] = hs
 }
 
 // bind_value is two-way: the slot's value follows `get`, and an input event
@@ -243,10 +248,12 @@ pub fn bind_attr_ctx(mut ins Instance, i int, name string, ctx voidptr, get fn (
 pub fn bind_event_ctx(mut ins Instance, i int, ctx voidptr, handler fn (ctx voidptr)) {
 	name := ins.descs[i].name
 	mut node := ins.slots[i]
-	node.on_ctx[name] = EvtHandler{
+	mut hs := node.on_ctx[name] or { []EvtHandler{} }
+	hs << EvtHandler{
 		run: handler
 		ctx: ctx
 	}
+	node.on_ctx[name] = hs
 }
 
 @[heap]
@@ -340,16 +347,17 @@ pub fn (mut ins Instance) dispose() {
 // bridge does when a real DOM event arrives.
 pub fn (mut ins Instance) dispatch(i int, event string) {
 	mut node := ins.slots[i]
-	if h := node.on[event] {
+	for h in node.on[event] or { []fn (){} } {
 		h() // closure handler (native)
 	}
-	if h := node.on_ctx[event] {
+	for h in node.on_ctx[event] or { []EvtHandler{} } {
 		h.run(h.ctx) // closure-free handler (codegen/wasm)
 	}
 }
 
-// input simulates a user typing into a two-way-bound slot: set the value, then
-// run the registered writer (as a real `input` event would).
+// input simulates a user typing into a two-way-bound slot: set the value, run
+// the registered writer, then any @input handlers (as a real `input` event
+// would: codegen registers @bind before the element's events).
 pub fn (mut ins Instance) input(i int, v string) {
 	mut node := ins.slots[i]
 	node.value = v
@@ -359,6 +367,7 @@ pub fn (mut ins Instance) input(i int, v string) {
 	if node.on_input_ctx != unsafe { nil } {
 		node.on_input_ctx.set(node.on_input_ctx.ctx, v) // closure-free writer (codegen/wasm)
 	}
+	ins.dispatch(i, 'input')
 }
 
 // value_of reads a slot element's current value — what the host reads off the
@@ -387,6 +396,7 @@ fn build_tree(html string) &Node {
 fn convert(n ast.Node) &Node {
 	mut node := &Node{
 		tag: n.tag
+		raw: n.raw_text
 	}
 	for a in n.attrs {
 		node.attrs[a.name] = a.value
@@ -439,7 +449,7 @@ fn slot_node(root &Node, d SlotDesc) &Node {
 		}
 		k++
 	}
-	return n
+	panic('vcsr: anchor ${d.anchor} not found in <${n.tag}>') // what the host throws
 }
 
 // node_at walks `path` down element children (text nodes don't count, matching
@@ -453,7 +463,8 @@ fn node_at(root &Node, path []int) &Node {
 }
 
 // element_child returns the `idx`-th ELEMENT child of `n`, skipping text and
-// comment nodes. A bad index degrades to `n` itself rather than panicking.
+// comment nodes. A path that doesn't resolve means vcsr's tree and the
+// browser's differ, which the host can't patch either: fail loudly.
 fn element_child(n &Node, idx int) &Node {
 	mut ei := 0
 	for ch in n.children {
@@ -465,7 +476,7 @@ fn element_child(n &Node, idx int) &Node {
 		}
 		ei++
 	}
-	return n
+	panic('vcsr: no element child ${idx} in <${n.tag}>')
 }
 
 // html serializes the live tree the way the browser's outerHTML does: text and
@@ -476,54 +487,62 @@ pub fn (v View) html() string {
 	return sb.str()
 }
 
-// raw_text_parents: the DOM serializer writes their text children unescaped.
-const raw_text_parents = ['style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext']
-
 fn write_html(mut sb strings.Builder, n &Node, raw bool) {
 	if n.is_text {
-		sb.write_string(if raw { n.text } else { escape_html(n.text, false) })
+		if raw {
+			sb.write_string(n.text)
+		} else {
+			write_escaped(mut sb, n.text, false)
+		}
 		return
 	}
 	if n.is_comment {
-		sb.write_string('<!--${n.text}-->')
+		sb.write_string('<!--')
+		sb.write_string(n.text)
+		sb.write_string('-->')
 		return
 	}
-	sb.write_string('<${n.tag}')
+	sb.write_u8(`<`)
+	sb.write_string(n.tag)
 	for k, val in n.attrs {
-		sb.write_string(' ${k}="${escape_html(val, true)}"')
+		sb.write_u8(` `)
+		sb.write_string(k)
+		sb.write_string('="')
+		write_escaped(mut sb, val, true)
+		sb.write_u8(`"`)
 	}
-	sb.write_string('>')
+	sb.write_u8(`>`)
 	if parser.is_void(n.tag) {
 		return
 	}
 	for ch in n.children {
-		write_html(mut sb, ch, n.tag in raw_text_parents)
+		write_html(mut sb, ch, n.raw)
 	}
-	sb.write_string('</${n.tag}>')
+	sb.write_string('</')
+	sb.write_string(n.tag)
+	sb.write_u8(`>`)
 }
 
-// escape_html escapes text the way the HTML serializer does: `&`, a no-break
+// write_escaped escapes text the way the HTML serializer does: `&`, a no-break
 // space, `<` and `>`, plus `"` in an attribute value.
-fn escape_html(s string, in_attr bool) string {
-	mut out := strings.new_builder(s.len + 8)
+fn write_escaped(mut sb strings.Builder, s string, in_attr bool) {
 	mut i := 0
 	for i < s.len {
 		c := s[i]
 		if c == `&` {
-			out.write_string('&amp;')
+			sb.write_string('&amp;')
 		} else if c == `<` {
-			out.write_string('&lt;')
+			sb.write_string('&lt;')
 		} else if c == `>` {
-			out.write_string('&gt;')
+			sb.write_string('&gt;')
 		} else if c == `"` && in_attr {
-			out.write_string('&quot;')
+			sb.write_string('&quot;')
 		} else if c == 0xC2 && i + 1 < s.len && s[i + 1] == 0xA0 {
-			out.write_string('&nbsp;') // U+00A0 in UTF-8
+			sb.write_string('&nbsp;') // U+00A0 in UTF-8
 			i++
 		} else {
-			out.write_u8(c)
+			sb.write_u8(c)
 		}
 		i++
 	}
-	return out.str()
 }

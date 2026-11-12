@@ -10,7 +10,8 @@
 // nodes cross the boundary as indices into H; strings as (ptr, len) into the
 // module's linear memory.
 
-const td = new TextDecoder();
+// ignoreBOM: a string that starts with U+FEFF keeps it (the default drops it)
+const td = new TextDecoder('utf-8', { ignoreBOM: true });
 const te = new TextEncoder();
 
 // nthComment returns the k-th comment child of `el` — a slot anchor (`<!---->`).

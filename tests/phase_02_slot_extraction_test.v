@@ -159,8 +159,8 @@ fn test_interpolation_beside_elements_gets_an_anchored_text_node() {
 	ct := compile('<p>{{ a }} and <b>bold</b> then {{ b }}</p>')
 	assert ct.html == '<p><!----> and <b>bold</b> then <!----></p>'
 	assert ct.slots.len == 2
-	assert ct.slots[0].anchor == 0 && ct.slots[0].expr == 'a'
-	assert ct.slots[1].anchor == 1 && ct.slots[1].expr == 'b'
+	assert ct.slots[0].anchor == 0 && ct.slots[0].text_exprs() == ['a']
+	assert ct.slots[1].anchor == 1 && ct.slots[1].text_exprs() == ['b']
 }
 
 fn test_anchor_indices_count_every_anchor_in_the_container() {
@@ -267,4 +267,53 @@ fn test_a_lt_that_is_text_is_escaped_in_the_skeleton() {
 	ct := compile('<div><b>x</b> write <?xml version="1.0"?> 1 < 2, then {{ y }}<i>{{ z }}</i></div>')
 	assert ct.html == '<div><b>x</b> write &lt;?xml version="1.0"?> 1 &lt; 2, then <!----><i></i></div>'
 	assert ct.slots[0].anchor == 0
+}
+
+// --- second review of #15 -------------------------------------------------------
+
+fn expect_compile_error(markup string, want string) {
+	tree := parser.parse_template(markup) or { panic(err) }
+	slots.compile(tree) or {
+		assert err.msg().contains(want), err.msg()
+		return
+	}
+	assert false, 'expected "${markup}" to fail'
+}
+
+fn test_root_if_and_for_are_errors_not_dropped() {
+	expect_compile_error('<section @if="show"><p>x</p></section>', '@if or @for')
+	expect_compile_error('<ul @for="x in xs"><li>{{ x }}</li></ul>', '@if or @for')
+}
+
+fn test_text_bodies_become_one_text_slot() {
+	ct := compile('<form><textarea>Dear {{ name }},<br>thanks &amp; bye</textarea></form>')
+	assert ct.html == '<form><textarea></textarea></form>'
+	assert ct.slots[0].parts.map(it.text) == ['Dear ', 'name', ',<br>thanks & bye']
+	st := compile('<div><style>a::after { content: "&amp;" } p { color: {{ c }} }</style></div>')
+	assert st.html == '<div><style></style></div>'
+	assert st.slots[0].parts.map(it.text) == [
+		'a::after { content: "&amp;" } p { color: ',
+		'c',
+		' }',
+	] // raw text: not decoded
+	assert compile('<div><script>if (a < b) go()</script></div>').html == '<div><script>if (a < b) go()</script></div>'
+}
+
+fn test_bindings_inside_template_are_an_error() {
+	expect_compile_error('<div><template><p>{{ x }}</p></template></div>', '<template>')
+	assert compile('<div><template><p>static</p></template></div>').slots.len == 0
+}
+
+fn test_bind_is_wired_before_the_elements_events() {
+	ct := compile('<input @input="typed" @bind="name">')
+	assert ct.slots.map(it.kind) == [SlotKind.bind, .event]
+}
+
+fn test_bound_attribute_names_fold_like_setattribute() {
+	ct := compile('<div :ariaLabel="x"><svg :viewBox="v"></svg></div>')
+	assert ct.slots.map(it.name) == ['arialabel', 'viewBox']
+}
+
+fn test_an_authored_newline_written_as_a_reference_survives() {
+	assert compile('<div><pre>&#10;&#10;x</pre></div>').html == '<div><pre>\n&#10;x</pre></div>'
 }

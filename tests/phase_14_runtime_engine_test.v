@@ -256,3 +256,55 @@ fn test_skeleton_whitespace_is_kept_as_written() {
 		assert ins.view().html() == html
 	}
 }
+
+@[heap]
+struct Log {
+mut:
+	lines []string
+}
+
+// every handler for an event runs, in order, and input() runs the @bind writer
+// before @input handlers, as the browser does
+fn test_every_handler_runs_and_input_writes_first() {
+	mut name := signal('a')
+	mut log := &Log{}
+	tpl := Template{
+		html:  '<div><input></div>'
+		slots: [SlotDesc{
+			kind: .bind
+			path: [0]
+		}, SlotDesc{
+			kind: .event
+			path: [0]
+			name: 'input'
+		}, SlotDesc{
+			kind: .event
+			path: [0]
+			name: 'input'
+		}]
+	}
+	mut ins := tpl.instance()
+	bind_value(mut ins, 0, fn [mut name] () string {
+		return name.get()
+	}, fn [mut name] (v string) {
+		name.set(v)
+	})
+	bind_event(mut ins, 1, fn [mut name, mut log] () {
+		log.lines << 'one:${name.peek()}'
+	})
+	bind_event(mut ins, 2, fn [mut log] () {
+		log.lines << 'two'
+	})
+	ins.input(0, 'xyz')
+	assert log.lines == ['one:xyz', 'two']
+}
+
+// the mock reads the skeleton like the browser: names folded, raw text kept
+fn test_skeleton_names_fold_and_raw_text_round_trips() {
+	tpl := Template{
+		html:  '<DIV TabIndex="0"><xmp>a &amp; <b></xmp><P>x</P></DIV>'
+		slots: []
+	}
+	mut ins := tpl.instance()
+	assert ins.view().html() == '<div tabindex="0"><xmp>a &amp; <b></xmp><p>x</p></div>'
+}
