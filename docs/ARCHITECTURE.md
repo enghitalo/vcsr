@@ -106,7 +106,9 @@ pub fn (mut c Counter) view() vcsr.View {
 }
 
 pub fn (c Counter) style() string {
-	return '.counter_x1{display:grid;gap:.5rem}.muted_x1{color:var(--muted,#888)}'
+	// scoped by attribute: every skeleton element carries data-s-<hash>, and
+	// the same CSS is in the Template's `css`, added to the page once
+	return '.counter[data-s-fc0f33c3]{display: grid; …}.muted[data-s-fc0f33c3]{…}'
 }
 ```
 

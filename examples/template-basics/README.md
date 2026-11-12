@@ -41,8 +41,8 @@ is dropped.
 
 ## Files
 
-Same layout as [counter](../counter): the triplet (here without a `.css`; the
-page styles live in [wasm/index.html](wasm/index.html) until component styles
-land, [roadmap item 3](../../docs/ROADMAP.md)), a browser entry and a native
+Same layout as [counter](../counter): the triplet (its `greeting.css` is scoped
+to the component and added to the page by its first view; only page styles live
+in [wasm/index.html](wasm/index.html)), a browser entry and a native
 entry, the native test [src/greeting_test.v](src/greeting_test.v) (`make test`),
 and the browser check [check.mjs](check.mjs) (`make examples`).

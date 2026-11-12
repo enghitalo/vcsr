@@ -170,7 +170,7 @@ dist/
 ├── app.[hash].js           streaming-instantiate loader + router + dynamic linker
 ├── core.[hash].wasm        runtime + shared components + landing route
 ├── route-<name>.[hash].wasm one per lazy route
-├── app.[hash].css          scoped + atomized stylesheet
+├── app.[hash].css          scoped, bundled stylesheet
 ├── *.br / *.gz             precompressed siblings
 ├── *.map                   source maps back to .v
 └── manifest.json           vcsr's build record: { hash, route?, preload } — drives the loader

@@ -681,7 +681,7 @@ fn parse_methods(src string, struct_name string) []string {
 // static `class` attributes and the `class:name` bindings. It reports whether a
 // `:class` binding makes the set dynamic (then nothing can be tree-shaken).
 fn collect_classes(node ast.Node, mut out []string) bool {
-	mut dynamic := node.attr_bindings.any(it.name == 'class')
+	mut dynamic := node.attr_bindings.any(it.name.to_lower() == 'class')
 	for a in node.attrs {
 		if a.name.to_lower() == 'class' {
 			out << a.value.fields()

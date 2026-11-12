@@ -358,3 +358,32 @@ fn test_class_toggle_and_classes_keep_the_static_class() {
 	_ := tpl.instance()
 	assert runtime.styles().filter(it == '.card{x:1}').len == 1
 }
+
+// :class never removes a class the static `class` or a class:x provides, and
+// the class list stays de-duplicated, as classList keeps it
+fn test_classes_leave_owned_classes_and_dedupe() {
+	mut t := Theme{
+		on:   signal(false)
+		kind: signal('btn x y y')
+	}
+	tpl := Template{
+		html:  '<section class="btn btn"></section>'
+		slots: [SlotDesc{
+			kind: .toggle
+			path: []
+			name: 'x'
+		}, SlotDesc{
+			kind: .classes
+			path: []
+			name: 'btn x'
+		}]
+	}
+	mut ins := tpl.instance()
+	runtime.bind_toggle_ctx(mut ins, 0, voidptr(&t), theme_on)
+	runtime.bind_classes_ctx(mut ins, 1, voidptr(&t), theme_kind)
+	dom := ins.view()
+	assert dom.html() == '<section class="btn x y"></section>'
+	t.on.set(true)
+	t.kind.set('y')
+	assert dom.html() == '<section class="btn x y"></section>'
+}

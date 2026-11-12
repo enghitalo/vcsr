@@ -72,13 +72,14 @@ fn add_style(css string) bool {
 	return true
 }
 
-// class_diff lists the classes to remove (in `old`, not in `new`) and to add
-// (in `new`, not in `old`) when a `:class` value changes; classList does the
-// rest, so the element's static classes and class:x toggles are left alone.
-fn class_diff(old string, new string) ([]string, []string) {
+// class_diff lists the classes to remove (in `old`, not in `new`, and not
+// `owned`: the element's static classes and class:x names, which :class must
+// leave alone) and to add (in `new`, not in `old`) when a `:class` value changes.
+fn class_diff(old string, new string, owned string) ([]string, []string) {
 	o := old.fields()
 	n := new.fields()
-	return o.filter(it !in n), n.filter(it !in o)
+	keep := owned.fields()
+	return o.filter(it !in n && it !in keep), n.filter(it !in o)
 }
 
 // cond_anchor_text and list_anchor_text are what an @if / @for anchor comment

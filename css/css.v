@@ -55,7 +55,7 @@ mut:
 }
 
 // group_at_rules hold rules and are recursed into (their rules get scoped).
-const group_at_rules = ['media', 'supports', 'container', 'layer', 'scope', 'document']
+const group_at_rules = ['media', 'supports', 'container', 'layer', 'scope', 'document', 'starting-style']
 
 // scope_attr is the attribute a component's elements carry for its scoped styles.
 pub fn scope_attr(component_name string) string {
@@ -118,7 +118,8 @@ fn scope_nodes(nodes []CssNode, attr string, used ?[]string) []CssNode {
 			}
 			.at_group {
 				children := scope_nodes(n.children, attr, used)
-				if children.len > 0 {
+				// an emptied group goes, except a @layer: it still sets the layer order
+				if children.len > 0 || at_name(n.prelude) == 'layer' {
 					out << CssNode{
 						kind:     .at_group
 						prelude:  n.prelude
@@ -141,7 +142,7 @@ fn scope_selector(sel string, attr string) string {
 	start := last_compound_start(sel)
 	compound := sel[start..]
 	head := unwrap_global(sel[..start])
-	if compound.starts_with(':global(') || is_global_compound(compound) {
+	if compound.contains(':global(') || is_global_compound(compound) {
 		return head + unwrap_global(compound)
 	}
 	ins := pseudo_start(compound)
@@ -222,7 +223,11 @@ fn pseudo_start(compound string) int {
 
 // is_global_compound: `:root…`, `html…`, `body…` belong to the document.
 fn is_global_compound(compound string) bool {
-	return compound.starts_with(':root') || compound_base(compound) in ['html', 'body']
+	mut n := 0
+	for n < compound.len && (is_ident_part(compound[n]) || compound[n] == `-`) {
+		n++
+	}
+	return compound.starts_with(':root') || compound[..n].to_lower() in ['html', 'body']
 }
 
 // compound_base strips pseudos from a compound (`body:hover` → `body`).
@@ -243,10 +248,12 @@ fn compound_can_match(compound string, used []string) bool {
 		if base[i] == `.` {
 			i++
 			start := i
-			for i < base.len && (is_ident_part(base[i]) || base[i] == `-` || base[i] == `\\`) {
+			for i < base.len && (is_ident_part(base[i]) || base[i] == `-` || base[i] == `\\`
+				|| base[i] >= 0x80) {
 				i += if base[i] == `\\` { 2 } else { 1 }
 			}
-			if base[start..i] !in used {
+			// `.sm\:p-2` names the class `sm:p-2`
+			if base[start..i].replace('\\', '') !in used {
 				return false
 			}
 			continue
@@ -268,13 +275,27 @@ pub fn bundle(sheets []ScopedCss) Sheet {
 	for sc in sheets {
 		flatten(sc.nodes, [], mut flat)
 	}
+	// @charset and @import only count before every rule: hoist them (each once);
+	// other statements (`@layer a, b;` sets the layer order) stay where they are
+	mut head := []FlatRule{}
+	mut rest := []FlatRule{}
+	for f in flat {
+		if f.node.kind == .at_stmt && f.context.len == 0
+			&& at_name(f.node.prelude) in ['charset', 'import'] {
+			if !head.any(it.node.prelude == f.node.prelude) {
+				head << f
+			}
+		} else {
+			rest << f
+		}
+	}
 	mut last := map[string]int{}
-	for i, f in flat {
+	for i, f in rest {
 		last[f.key()] = i
 	}
-	mut kept := []FlatRule{}
-	for i, f in flat {
-		if last[f.key()] == i {
+	mut kept := head.clone()
+	for i, f in rest {
+		if f.node.kind == .at_stmt || last[f.key()] == i {
 			kept << f
 		}
 	}
@@ -341,6 +362,9 @@ fn render(nodes []CssNode) string {
 		match n.kind {
 			.rule {
 				b.write_string('${n.prelude}{${n.body}')
+				if n.children.len > 0 && n.body != '' && !n.body.ends_with(';') {
+					b.write_u8(`;`)
+				}
 				if n.children.len > 0 {
 					b.write_string(render(n.children))
 				}
@@ -437,6 +461,11 @@ fn (mut p CssParser) read_prelude() !(string, u8) {
 	mut depth := 0
 	for p.pos < p.src.len {
 		c := p.src[p.pos]
+		if c == `\\` && p.pos + 1 < p.src.len {
+			b.write_string(p.src[p.pos..p.pos + 2]) // an escaped character is never syntax
+			p.pos += 2
+			continue
+		}
 		if c == `/` && p.peek(1) == `*` {
 			p.skip_comment()!
 			b.write_u8(` `)
@@ -468,10 +497,12 @@ fn (mut p CssParser) read_prelude() !(string, u8) {
 }
 
 // parse_rule_body splits a rule's block into its own declarations (verbatim,
-// trimmed) and nested rules (CSS nesting). The cursor is just past `{`; on
-// return it is just past the matching `}`.
+// comments removed) and nested rules (CSS nesting). A nested at-rule
+// (`@media (…) { color: red }`) becomes a group whose declarations apply to
+// the parent (`&`). The cursor is just past `{`; on return it is just past the
+// matching `}`.
 fn (mut p CssParser) parse_rule_body(open int) !(string, []CssNode) {
-	mut decls := strings.new_builder(64)
+	mut decls := []string{}
 	mut children := []CssNode{}
 	mut seg_start := p.pos
 	for {
@@ -479,10 +510,12 @@ fn (mut p CssParser) parse_rule_body(open int) !(string, []CssNode) {
 			return error('unclosed `{` of the rule at ${p.at(open)}')
 		}
 		c := p.src[p.pos]
+		if c == `\\` {
+			p.pos += 2 // an escaped character is never syntax
+			continue
+		}
 		if c == `/` && p.peek(1) == `*` {
-			decls.write_string(p.src[seg_start..p.pos])
-			p.skip_comment()!
-			seg_start = p.pos
+			p.skip_comment()! // removed when the segment is used
 			continue
 		}
 		if c == `"` || c == `'` {
@@ -494,24 +527,45 @@ fn (mut p CssParser) parse_rule_body(open int) !(string, []CssNode) {
 			continue
 		}
 		if c == `}` {
-			decls.write_string(p.src[seg_start..p.pos])
+			decls << p.src[seg_start..p.pos]
 			p.pos++
-			return trim_decls(decls.str()), children
+			return join_decls(decls), children
 		}
 		if c == `{` {
 			// a nested rule: its prelude is the text since the last `;` or block
-			seg := p.src[seg_start..p.pos]
+			seg := strip_comments(p.src[seg_start..p.pos])
 			cut := seg.last_index_u8(`;`)
-			head := if cut >= 0 { seg[..cut + 1] } else { '' }
-			decls.write_string(head)
-			prelude := collapse_ws(strip_comments(seg[cut + 1..]))
+			prelude := collapse_ws(seg[cut + 1..])
+			if prelude.starts_with('--') && prelude.contains(':') {
+				// a custom property whose value is a `{}` block: still a declaration
+				p.pos = skip_braces(p.src, p.pos)
+				continue
+			}
+			decls << if cut >= 0 { seg[..cut + 1] } else { '' }
 			p.pos++
 			nested_decls, nested_children := p.parse_rule_body(p.pos - 1)!
-			children << CssNode{
-				kind:     .rule
-				prelude:  prelude
-				body:     nested_decls
-				children: nested_children
+			if prelude.starts_with('@') {
+				mut inner := []CssNode{}
+				if nested_decls != '' {
+					inner << CssNode{
+						kind:    .rule
+						prelude: '&'
+						body:    nested_decls
+					}
+				}
+				inner << nested_children
+				children << CssNode{
+					kind:     .at_group
+					prelude:  prelude
+					children: inner
+				}
+			} else {
+				children << CssNode{
+					kind:     .rule
+					prelude:  prelude
+					body:     nested_decls
+					children: nested_children
+				}
 			}
 			seg_start = p.pos
 			continue
@@ -519,6 +573,24 @@ fn (mut p CssParser) parse_rule_body(open int) !(string, []CssNode) {
 		p.pos++
 	}
 	return '', children
+}
+
+// join_decls joins a rule's declaration segments (split by its nested rules):
+// comments removed, whitespace collapsed, a `;` between two segments.
+fn join_decls(segs []string) string {
+	mut parts := []string{}
+	for seg in segs {
+		d := trim_decls(strip_comments(seg))
+		if d != '' {
+			parts << d
+		}
+	}
+	for i in 0 .. parts.len - 1 {
+		if !parts[i].ends_with(';') {
+			parts[i] += ';'
+		}
+	}
+	return parts.join(' ')
 }
 
 // read_block_raw copies an opaque at-rule body (cursor just past `{`) up to its
@@ -533,6 +605,10 @@ fn (mut p CssParser) read_block_raw(open int) !string {
 			b.write_string(p.src[seg..p.pos])
 			p.skip_comment()!
 			seg = p.pos
+			continue
+		}
+		if c == `\\` {
+			p.pos += 2
 			continue
 		}
 		if c == `"` || c == `'` {
@@ -620,6 +696,29 @@ fn skip_parens(s string, i int) int {
 		if c == `(` {
 			depth++
 		} else if c == `)` {
+			depth--
+			if depth == 0 {
+				return j + 1
+			}
+		}
+		j++
+	}
+	return s.len
+}
+
+// skip_braces returns the index just past the `{…}` block starting at `i`.
+fn skip_braces(s string, i int) int {
+	mut depth := 0
+	mut j := i
+	for j < s.len {
+		c := s[j]
+		if c == `"` || c == `'` {
+			j = skip_string(s, j)
+			continue
+		}
+		if c == `{` {
+			depth++
+		} else if c == `}` {
 			depth--
 			if depth == 0 {
 				return j + 1

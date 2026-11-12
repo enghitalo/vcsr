@@ -131,6 +131,7 @@ fn test_class_bindings_become_toggle_and_classes_slots() {
 	assert c.tmpl.html == '<main class="a">x</main>' // the static class stays
 	src := c.codegen()!.source
 	assert src.contains("runtime.SlotDesc{ kind: .toggle, path: []int{}, name: 'on' }")
+	assert src.contains("runtime.SlotDesc{ kind: .classes, path: []int{}, name: 'a on' }")
 	assert src.contains('return c.count.get() > 0')
 	assert src.contains('runtime.bind_classes_ctx(mut ins, 1,')
 }
@@ -323,4 +324,14 @@ fn test_handler_value_is_trimmed() {
 fn test_a_signal_passed_as_mut_or_ref_stays_the_signal() {
 	src := greet_src('<div><button @click="label(mut n)">a</button><i @click="label(&name)">b</i></div>')
 	assert src.contains('g.label(mut g.n)') && src.contains('g.label(&g.name)')
+}
+
+fn test_class_binding_in_any_case_keeps_the_static_class() {
+	c := analyze(
+		v:    counter_v
+		html: '<main class="keep" :CLASS="\'dyn\'">x</main>'
+		css:  '.keep{a:1} .dyn{b:2}'
+	)!
+	assert c.tmpl.slots.map(it.kind.str()) == ['classes'] && c.tmpl.slots[0].name == 'keep'
+	assert c.codegen()!.source.contains('.dyn[') // dynamic: not tree-shaken
 }

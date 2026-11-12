@@ -138,11 +138,20 @@ fn serialize(node ast.Node, path []int, scope string, mut sl []SlotDesc) !string
 		}
 	}
 	for ab in node.attr_bindings {
-		if ab.name == 'class' {
-			// added through classList, so the static `class` stays
+		if ab.name.to_lower() == 'class' {
+			// added through classList, so the static `class` stays; `name` lists
+			// the classes it must never remove (the static ones and class:x's)
+			mut owned := []string{}
+			for a in node.attrs {
+				if a.name.to_lower() == 'class' {
+					owned << a.value.fields()
+				}
+			}
+			owned << node.class_bindings.map(it.name)
 			sl << SlotDesc{
 				kind: .classes
 				path: path.clone()
+				name: owned.join(' ')
 				expr: ab.expr
 			}
 			continue

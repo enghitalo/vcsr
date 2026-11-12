@@ -3,7 +3,7 @@
 > **Status: all 11 phases implemented and passing (TDD).** `v test tests/` is
 > green end-to-end: the `.html` parser ([`ast/`](ast), [`parser/`](parser)), slot
 > extraction ([`slots/`](slots)), reactive binding ([`bind/`](bind)), the
-> component model ([`component/`](component)), scoped/atomized CSS ([`css/`](css)),
+> component model ([`component/`](component)), scoped CSS ([`css/`](css)),
 > the router + code-split plan ([`router/`](router)), the wasm link plan + ABI
 > inspector ([`wasm/`](wasm)), the manifest reader ([`manifest/`](manifest)), and
 > the bundle/e2e build ([`bundle/`](bundle)) serving through vanilla's
@@ -104,7 +104,7 @@ shared-memory code-splitting that keeps first load small.
  │ 3 bind       slots → reactive binding code         (phase 03)  │
  │ 4 component  pair .v/.html/.css, resolve refs,                 │
  │              EMIT PLAIN V (name.gen.v)             (phase 04)  │
- │ 5 css        parse .css → scope + atomize + shake  (phase 05)  │
+ │ 5 css        parse .css → scope + shake + bundle   (phase 05)  │
  │ 6 router     route table → chunk plan (core/lazy)  (phase 06)  │
  │ 7 wasm       v -cc clang(wasi): core MAIN + sides  (phase 07)  │
  │ 8 bundle     dist/ + hashing + brotli + sourcemaps (phase 08)  │
@@ -134,7 +134,7 @@ dist/
 ├── app.[hash].js           tiny loader: streaming-instantiate + router + dynamic linker
 ├── core.[hash].wasm        runtime + reactive + dom + router + shared components + landing route
 ├── route-<name>.[hash].wasm one per lazy route; imports core's memory/table
-├── app.[hash].css          scoped + atomized stylesheet
+├── app.[hash].css          scoped, bundled stylesheet
 ├── *.br / *.gz             precompressed siblings of each text/wasm asset
 ├── *.map                   source maps back to .v
 └── manifest.json           vcsr's build record: { hash, route?, preload } — drives the loader
@@ -244,7 +244,7 @@ ABI-conformance spec (phase 11); each has a spec file under `tests/`. A phase is
 | 02 ✅ | [phase_02_slot_extraction_test.v](tests/phase_02_slot_extraction_test.v) | AST → static skeleton + slot table — **implemented** ([slots/](slots)) |
 | 03 ✅ | [phase_03_reactive_binding_test.v](tests/phase_03_reactive_binding_test.v) | slots → fine-grained signal bindings — **implemented** ([bind/](bind)) |
 | 04 ✅ | [phase_04_component_model_test.v](tests/phase_04_component_model_test.v) | pair `.v`/`.html`/`.css`, resolve refs, **emit plain V** (no builtins) — **implemented** ([component/](component)) |
-| 05 ✅ | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope + atomize + tree-shake — **implemented** ([css/](css)) |
+| 05 ✅ | [phase_05_scoped_css_test.v](tests/phase_05_scoped_css_test.v) | parse a `.css` file → scope (by attribute) + tree-shake + cascade-safe bundle — **implemented** ([css/](css)) |
 | 06 ✅ | [phase_06_router_codesplit_test.v](tests/phase_06_router_codesplit_test.v) | route table → core/lazy chunk plan — **implemented** ([router/](router)) |
 | 07 ✅ | [phase_07_wasm_linking_test.v](tests/phase_07_wasm_linking_test.v) | core MAIN + side modules over shared memory — **implemented** ([wasm/](wasm)) |
 | 08 ✅ | [phase_08_bundle_emit_test.v](tests/phase_08_bundle_emit_test.v) | dist/ emission, hashing, brotli, sourcemaps — **implemented** ([bundle/](bundle)) |

@@ -254,6 +254,7 @@ struct ClassesBind {
 	handle int
 	ctx    voidptr
 	get    fn (ctx voidptr) string = unsafe { nil }
+	owned  string // classes :class must not remove (the slot's name)
 mut:
 	last string // the classes added last time
 }
@@ -261,7 +262,7 @@ mut:
 fn patch_classes(p voidptr) {
 	mut b := unsafe { &ClassesBind(p) }
 	now := b.get(b.ctx)
-	gone, added := class_diff(b.last, now)
+	gone, added := class_diff(b.last, now, b.owned)
 	for c in gone {
 		C.host_toggle_class(b.handle, c.str, c.len, 0)
 	}
@@ -276,6 +277,7 @@ fn patch_classes(p voidptr) {
 pub fn bind_classes_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) string) {
 	b := &ClassesBind{
 		handle: ins.slots[i]
+		owned:  ins.descs[i].name
 		ctx:    ctx
 		get:    get
 	}

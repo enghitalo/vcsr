@@ -334,15 +334,19 @@ pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr
 
 // toggle_class is classList.toggle(name, on) on the mock: the class attribute
 // is created when a class is added, and kept (maybe empty) once it exists.
+// Like classList, a change rewrites the attribute as the de-duplicated list.
 fn (mut n Node) toggle_class(name string, on bool) {
-	mut list := (n.attrs['class'] or { '' }).fields()
-	has := name in list
-	if on && !has {
-		list << name
-	} else if !on && has {
-		list = list.filter(it != name)
-	} else if 'class' in n.attrs || !on {
+	if 'class' !in n.attrs && !on {
 		return
+	}
+	mut list := []string{}
+	for c in (n.attrs['class'] or { '' }).fields() {
+		if c !in list && (on || c != name) {
+			list << c
+		}
+	}
+	if on && name !in list {
+		list << name
 	}
 	n.attrs['class'] = list.join(' ')
 }
@@ -375,9 +379,10 @@ pub fn bind_toggle_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr
 
 @[heap]
 struct ClassesBind {
-	node &Node
-	ctx  voidptr
-	get  fn (ctx voidptr) string = unsafe { nil }
+	node  &Node
+	ctx   voidptr
+	get   fn (ctx voidptr) string = unsafe { nil }
+	owned string // classes :class must not remove (the slot's name)
 mut:
 	last string // the classes added last time
 }
@@ -386,7 +391,7 @@ fn patch_classes(p voidptr) {
 	mut b := unsafe { &ClassesBind(p) }
 	mut n := b.node
 	now := b.get(b.ctx)
-	gone, added := class_diff(b.last, now)
+	gone, added := class_diff(b.last, now, b.owned)
 	for c in gone {
 		n.toggle_class(c, false)
 	}
@@ -400,9 +405,10 @@ fn patch_classes(p voidptr) {
 // static ones: :class="expr".
 pub fn bind_classes_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) string) {
 	b := &ClassesBind{
-		node: ins.slots[i]
-		ctx:  ctx
-		get:  get
+		node:  ins.slots[i]
+		owned: ins.descs[i].name
+		ctx:   ctx
+		get:   get
 	}
 	ins.effects << vcsr.effect_handle_ctx(patch_classes, voidptr(b))
 }

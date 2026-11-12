@@ -96,3 +96,39 @@ fn test_global_unwraps_anywhere_in_a_selector() {
 	assert sc(':global(.dark) .card { x: 1 }') == '.dark .card[${a}]{x: 1}'
 	assert sc('@media (x) { :global(.y) .z, .w :global(.v) { x: 1 } }') == '@media (x){.y .z[${a}],.w .v{x: 1}}'
 }
+
+// --- review of roadmap 3 (each output checked in Chrome) -------------------------
+
+fn test_nesting_keeps_declarations_nested_at_rules_and_comments_apart() {
+	assert sc('.card { .title { font-weight: bold } color: red }') == '.card[${a}]{color: red;.title[${a}]{font-weight: bold}}'
+	assert sc('.card { color: red; @media (min-width: 1px) { color: blue } }') == '.card[${a}]{color: red;@media (min-width: 1px){&[${a}]{color: blue}}}'
+	assert sc('.card { color: red; .a /* c */ .b { color: blue } }') == '.card[${a}]{color: red;.a .b[${a}]{color: blue}}'
+	assert sc('.card { --x: { a; b }; color: red }') == '.card[${a}]{--x: { a; b }; color: red}'
+}
+
+fn test_escapes_starting_style_and_global_compounds() {
+	assert sc('.content-\\[\\\'\\\'\\] { content: "" }') == '.content-\\[\\\'\\\'\\][${a}]{content: ""}'
+	assert sc('@starting-style { .a { opacity: 0 } }') == '@starting-style{.a[${a}]{opacity: 0}}'
+	assert sc('.a:global(.dark) { x: 1 }') == '.a.dark{x: 1}'
+	assert sc('html.dark { x: 1 }') == 'html.dark{x: 1}'
+	assert sc('@layer base {}') == '@layer base{}' // still sets the layer order
+}
+
+fn test_tree_shaking_reads_escaped_and_non_ascii_class_names() {
+	out := css.scope('Card', '.sm\\:p-2 { x: 1 } .café { y: 2 } .w-1\\/2 { z: 3 } .dead { w: 4 }',
+		used_classes: [
+			'sm:p-2',
+			'café',
+			'w-1/2',
+		]
+	)!.css
+	assert out == '.sm\\:p-2[${a}]{x: 1}.café[${a}]{y: 2}.w-1\\/2[${a}]{z: 3}'
+}
+
+fn test_bundle_hoists_imports_and_keeps_layer_statements() {
+	x := css.scope('A', '@charset "utf-8"; @layer base, theme; @layer theme { .c { color: red } }')!
+	y := css.scope('B', '@charset "utf-8"; @import url("b.css"); @layer base, theme; .d { e: 1 }')!
+	out := css.bundle([x, y]).text
+	assert out.starts_with('@charset "utf-8";@import url("b.css");@layer base, theme;@layer theme{')
+	assert out.count('@layer base, theme;') == 2 // each sheet's layer order stays in front of its rules
+}

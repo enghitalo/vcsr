@@ -143,8 +143,9 @@ at all. See [WASM-PATHS-ANALYSIS.md](WASM-PATHS-ANALYSIS.md) §6 — Path 2
 > no hand-written JS (verified against the emitted default in Chromium).
 >
 > Still future work: a map-free wasm **App/router** (the App layer is native-only
-> — it leans on the `js_ffi` mock whose maps don't run on wasm); injecting the
-> component's scoped `style()` CSS on the wasm path; and `@for` keyed-list render.
+> — it leans on the `js_ffi` mock whose maps don't run on wasm), and `@for`
+> keyed-list render. (A component's scoped CSS is added to the page by its
+> first view since roadmap item 3.)
 
 ### Gate 2 — The `js` FFI is a **synchronous** native mock
 
