@@ -11,12 +11,14 @@ import vcsr.ast
 import vcsr.parser
 
 pub enum SlotKind {
-	text  // patch an element's textContent, or the text node at an anchor
-	attr  // patch an attribute (`name`)
-	event // addEventListener(`name`)
-	bind  // two-way bind to `target_expr`
-	cond  // @if: an anchor comment; `row` is the conditional content
-	list  // @for: `row` is the per-item sub-template, keyed by `key_expr`
+	text    // patch an element's textContent, or the text node at an anchor
+	attr    // patch an attribute (`name`)
+	event   // addEventListener(`name`)
+	bind    // two-way bind to `target_expr`
+	cond    // @if: an anchor comment; `row` is the conditional content
+	list    // @for: `row` is the per-item sub-template, keyed by `key_expr`
+	toggle  // class:name: class `name` is on while `expr` is true
+	classes // :class: the classes `expr` names are added beside the static ones
 }
 
 // TextPart is one piece of a text slot: literal text, or an expression whose
@@ -43,7 +45,7 @@ pub mut:
 	path        []int // element-child-index path from the clone root
 	anchor      int = -1 // >= 0: the slot is the container's anchor-th comment child
 	name        string           // attr/event name
-	expr        string           // :attr expression
+	expr        string           // :attr, class:name or :class expression
 	parts       []TextPart       // text slots: literal text + expressions, concatenated
 	target_expr string           // @bind target
 	cond_expr   string           // @if condition
@@ -65,10 +67,18 @@ pub mut:
 	slots []SlotDesc
 }
 
+@[params]
+pub struct CompileOpt {
+pub:
+	// scope_attr, when set, is put on every element of the skeleton (and of the
+	// @if/@for rows), so the component's scoped CSS (css.scope) matches it
+	scope_attr string
+}
+
 // compile turns a parsed template Tree into its static skeleton + slot table.
 // The root is what the runtime clones and mounts, so it must be a plain HTML
 // element: not a component, and not conditional or repeated.
-pub fn compile(tree ast.Tree) !CompiledTemplate {
+pub fn compile(tree ast.Tree, opt CompileOpt) !CompiledTemplate {
 	root := tree.root
 	if root.kind == .component {
 		return error('the root of a template must be an HTML element, not the component <${root.tag}>: wrap it in one')
@@ -76,12 +86,12 @@ pub fn compile(tree ast.Tree) !CompiledTemplate {
 	if root.cond != none || root.each != none {
 		return error('the root element <${root.tag}> of a template cannot have @if or @for: wrap it in an element')
 	}
-	return compile_node(root)!
+	return compile_node(root, opt.scope_attr)!
 }
 
-fn compile_node(root ast.Node) !CompiledTemplate {
+fn compile_node(root ast.Node, scope string) !CompiledTemplate {
 	mut sl := []SlotDesc{}
-	html := serialize(root, []int{}, mut sl)!
+	html := serialize(root, []int{}, scope, mut sl)!
 	return CompiledTemplate{
 		html:  html
 		slots: sl
@@ -90,13 +100,16 @@ fn compile_node(root ast.Node) !CompiledTemplate {
 
 // serialize emits the static HTML for `node` (placed at `path`) and appends any
 // slots it contributes to `sl`.
-fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
+fn serialize(node ast.Node, path []int, scope string, mut sl []SlotDesc) !string {
 	if node.kind == .component {
 		return anchor_html // the root of a @for/@if row (the rows don't render yet)
 	}
 	mut s := '<' + node.tag
 	for a in node.attrs {
 		s += ' ${a.name}="${a.value.replace('"', '&quot;')}"'
+	}
+	if scope != '' {
+		s += ' ' + scope
 	}
 	// the node's own dynamic bindings become slots keyed to this element; @bind
 	// first, so its writer runs before an @input handler on the same element
@@ -116,7 +129,33 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 			modifiers: ev.modifiers
 		}
 	}
+	for cb in node.class_bindings {
+		sl << SlotDesc{
+			kind: .toggle
+			path: path.clone()
+			name: cb.name
+			expr: cb.expr
+		}
+	}
 	for ab in node.attr_bindings {
+		if ab.name.to_lower() == 'class' {
+			// added through classList, so the static `class` stays; `name` lists
+			// the classes it must never remove (the static ones and class:x's)
+			mut owned := []string{}
+			for a in node.attrs {
+				if a.name.to_lower() == 'class' {
+					owned << a.value.fields()
+				}
+			}
+			owned << node.class_bindings.map(it.name)
+			sl << SlotDesc{
+				kind: .classes
+				path: path.clone()
+				name: owned.join(' ')
+				expr: ab.expr
+			}
+			continue
+		}
 		sl << SlotDesc{
 			kind: .attr
 			path: path.clone()
@@ -180,7 +219,7 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 			if child.kind == .element && child.each == none && child.cond == none {
 				mut cp := path.clone()
 				cp << ei
-				s += serialize(child, cp, mut sl)!
+				s += serialize(child, cp, scope, mut sl)!
 				ei++
 				continue
 			}
@@ -204,7 +243,7 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 					anchor:      ai
 					source_expr: ea.source_expr
 					key_expr:    ea.key_expr
-					row:         compile_node(strip_each(child))!
+					row:         compile_node(strip_each(child), scope)!
 				}
 			} else if c := child.cond {
 				// @if: the row is the conditional content
@@ -213,7 +252,7 @@ fn serialize(node ast.Node, path []int, mut sl []SlotDesc) !string {
 					path:      path.clone()
 					anchor:    ai
 					cond_expr: c.expr
-					row:       compile_node(strip_cond(child))!
+					row:       compile_node(strip_cond(child), scope)!
 				}
 			} // a component: where it mounts (roadmap 7); see anchor_html
 			s += anchor_html

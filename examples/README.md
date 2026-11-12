@@ -13,6 +13,7 @@ make examples                      # build all of them and check each in Chrome
 |---|---|---|
 | [counter](counter) | one component: a signal, a computed value, a click handler | ✅ in Chrome ([screenshot](counter/screenshot.png)) |
 | [template-basics](template-basics) | the template language: mixed text, expressions in `{{ }}`, `@bind` on a void `<input>`, entities, whitespace | ✅ in Chrome ([screenshot](template-basics/screenshot.png)) |
+| [styling](styling) | component styles: scoped `.css` per component, `@media`, `@keyframes`, `class:` and `:class` bindings | ✅ in Chrome ([screenshot](styling/screenshot.png)) |
 | [serve-with-vanilla](serve-with-vanilla) | serving a built `dist/` with the [vanilla](https://github.com/enghitalo/vanilla) HTTP server via its `static_assets` module | ✅ (serves `testdata/fixture-app`) |
 | [spa](spa) | the *target* authoring experience: router + code splitting, a shared component, a store, lists, async fetch | ❌ illustrative — uses features still on the [roadmap](../docs/ROADMAP.md) |
 
@@ -33,7 +34,8 @@ A component is a **file triplet** sharing a basename (see
   and computed methods. **No `view()`/`style()`**: vcsr generates those.
 - `name.html` — the template in vcsr's dialect. What works today is listed in
   [docs/REVIEW-2026-10.md](../docs/REVIEW-2026-10.md#what-renders-today).
-- `name.css` — plain CSS.
+- `name.css` — plain CSS, scoped to the component and added to the page by
+  its first view (see [styling](styling)).
 
 vcsr parses the `.html`/`.css` with its own parsers (**no V compiler changes**)
 and emits `name.gen.v`: plain V implementing `view()`/`style()`, which stock `v`

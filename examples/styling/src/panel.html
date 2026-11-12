@@ -1,0 +1,11 @@
+<!-- class:dark toggles one class; :class adds `big`/`small` beside the static
+     `panel` class. Every element here carries Panel's scope attribute. -->
+<section class="panel" class:dark="dark" :class="size">
+  <h2 class="title">Panel</h2>
+  <p class="label">Panel's <code>.label</code> is red</p>
+  <p class="row"><span class="spinner"></span> a <code>@keyframes</code> animation</p>
+  <div class="actions">
+    <button class="toggle" @click="toggle">Dark</button>
+    <button class="resize" @click="resize">Size</button>
+  </div>
+</section>

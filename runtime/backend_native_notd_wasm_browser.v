@@ -107,6 +107,7 @@ pub fn (mut v View) dispose() {
 // instance clones the skeleton and resolves every slot node. The receiver is by
 // value because codegen calls it on a `const` Template.
 pub fn (t Template) instance() Instance {
+	add_style(t.css) // the page's stylesheets: see styles()
 	root := build_tree(t.html)
 	mut slots := []&Node{cap: t.slots.len}
 	for d in t.slots {
@@ -329,6 +330,93 @@ pub fn bind_list_ctx(mut ins Instance, i int, ctx voidptr, count fn (ctx voidptr
 		count: count
 	}
 	ins.effects << vcsr.effect_handle_ctx(patch_list, voidptr(b))
+}
+
+// toggle_class is classList.toggle(name, on) on the mock: the class attribute
+// is created when a class is added, and kept (maybe empty) once it exists.
+// Like classList, a change rewrites the attribute as the de-duplicated list.
+fn (mut n Node) toggle_class(name string, on bool) {
+	if 'class' !in n.attrs && !on {
+		return
+	}
+	mut list := []string{}
+	for c in (n.attrs['class'] or { '' }).fields() {
+		if c !in list && (on || c != name) {
+			list << c
+		}
+	}
+	if on && name !in list {
+		list << name
+	}
+	n.attrs['class'] = list.join(' ')
+}
+
+@[heap]
+struct ToggleBind {
+	node &Node
+	name string
+	ctx  voidptr
+	get  fn (ctx voidptr) bool = unsafe { nil }
+}
+
+fn patch_toggle(p voidptr) {
+	b := unsafe { &ToggleBind(p) }
+	mut n := b.node
+	n.toggle_class(b.name, b.get(b.ctx))
+}
+
+// bind_toggle_ctx keeps class `name` (the slot's name) on slot `i` while
+// `get(ctx)` is true: class:name="expr".
+pub fn bind_toggle_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) bool) {
+	b := &ToggleBind{
+		node: ins.slots[i]
+		name: ins.descs[i].name
+		ctx:  ctx
+		get:  get
+	}
+	ins.effects << vcsr.effect_handle_ctx(patch_toggle, voidptr(b))
+}
+
+@[heap]
+struct ClassesBind {
+	node  &Node
+	ctx   voidptr
+	get   fn (ctx voidptr) string = unsafe { nil }
+	owned string // classes :class must not remove (the slot's name)
+mut:
+	last string // the classes added last time
+}
+
+fn patch_classes(p voidptr) {
+	mut b := unsafe { &ClassesBind(p) }
+	mut n := b.node
+	now := b.get(b.ctx)
+	gone, added := class_diff(b.last, now, b.owned)
+	for c in gone {
+		n.toggle_class(c, false)
+	}
+	for c in added {
+		n.toggle_class(c, true)
+	}
+	b.last = now
+}
+
+// bind_classes_ctx adds the classes `get(ctx)` names to slot `i`, beside its
+// static ones: :class="expr".
+pub fn bind_classes_ctx(mut ins Instance, i int, ctx voidptr, get fn (ctx voidptr) string) {
+	b := &ClassesBind{
+		node:  ins.slots[i]
+		owned: ins.descs[i].name
+		ctx:   ctx
+		get:   get
+	}
+	ins.effects << vcsr.effect_handle_ctx(patch_classes, voidptr(b))
+}
+
+// styles returns the scoped stylesheets the views built so far added to the
+// page, in order (each component's once) — what the wasm host puts in <head>.
+pub fn styles() []string {
+	return vcsr_styles.clone()
 }
 
 // dispose detaches every effect this instance's bindings created, so dropping a

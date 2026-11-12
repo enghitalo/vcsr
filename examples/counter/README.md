@@ -25,7 +25,7 @@ refresh the screenshot: `make screenshots`.
 |---|---|
 | [src/counter.v](src/counter.v) | **logic**: the `Counter` struct — a `count` signal, the `inc` handler, the `doubled` computed |
 | [src/counter.html](src/counter.html) | **template**: `{{ count }}`, `{{ doubled }}`, `@click="inc"` |
-| [src/counter.css](src/counter.css) | **styles** (scoping them to the component is [roadmap item 3](../../docs/ROADMAP.md)) |
+| [src/counter.css](src/counter.css) | **styles**, scoped to the component (see [styling](../styling)) |
 | [src/entry_d_wasm_browser.v](src/entry_d_wasm_browser.v) | the browser entry: `boot()` builds the view and mounts it into `#app` |
 | [src/main_notd_wasm_browser.v](src/main_notd_wasm_browser.v) | the native entry (mock DOM), used by the tests |
 | [src/counter_test.v](src/counter_test.v) | drives the generated `view()` natively (`make test`) |
@@ -42,12 +42,13 @@ writes `src/counter.gen.v` — plain V, no compiler builtins:
 
 ```v
 const __counter_tpl = runtime.Template{
-	html:  '<main class="counter"><h1></h1><p class="muted">double <span></span></p><button>+1</button></main>'
+	html:  '<main class="counter" data-s-fc0f33c3><h1 data-s-fc0f33c3></h1><p class="muted" data-s-fc0f33c3>double <span data-s-fc0f33c3></span></p><button data-s-fc0f33c3>+1</button></main>'
 	slots: [
 		runtime.SlotDesc{ kind: .text, path: [0] },                 // <h1>     ← count
 		runtime.SlotDesc{ kind: .text, path: [1, 0] },              // <span>   ← doubled
 		runtime.SlotDesc{ kind: .event, path: [2], name: 'click' }, // <button> → inc
 	]
+	css:   '.counter[data-s-fc0f33c3]{display: grid; …}.muted[data-s-fc0f33c3]{…}button[data-s-fc0f33c3]{…}'
 }
 
 fn counter_slot0_get(ctxp voidptr) string {
@@ -66,6 +67,8 @@ pub fn (mut c Counter) view() runtime.View {
 ```
 
 The HTML string is the static skeleton, embedded in the wasm data segment; the
-host parses it once and clones it. The slot table says which node each binding
+host parses it once and clones it. Every element carries the component's scope
+attribute, which its scoped `css` requires; the first view adds that CSS to the
+page. The slot table says which node each binding
 patches. Bindings are closure-free (a top-level fn plus a context pointer)
 because capturing closures can't run on wasm.

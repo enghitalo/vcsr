@@ -21,6 +21,10 @@ VCSR_IMPORT(host_anchor_text)       int  host_anchor_text(int node, int k);
 VCSR_IMPORT(host_set_text)    void host_set_text(int node, const unsigned char* ptr, int len);
 VCSR_IMPORT(host_set_attr)    void host_set_attr(int node, const unsigned char* np, int nl, const unsigned char* vp, int vl);
 VCSR_IMPORT(host_set_value)   void host_set_value(int node, const unsigned char* ptr, int len);
+// classList.toggle(name, on): class:name bindings and :class
+VCSR_IMPORT(host_toggle_class) void host_toggle_class(int node, const unsigned char* np, int nl, int on);
+// a component's scoped stylesheet: a <style> in <head>, added once
+VCSR_IMPORT(host_add_style)   void host_add_style(const unsigned char* css, int len);
 
 // events: register a wasm callback index; host calls vcsr_dispatch / vcsr_dispatch_input back
 VCSR_IMPORT(host_on)       void host_on(int node, const unsigned char* ev, int el, int cb_idx);

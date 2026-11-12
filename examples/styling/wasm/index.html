@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>vcsr — styling</title>
+  <style>
+    /* page styles only: each component's styles come from its .css, scoped
+       and added to <head> by the wasm module */
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #f4f5f7; color: #1d2330; }
+    #app { width: 24rem; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

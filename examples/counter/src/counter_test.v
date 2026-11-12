@@ -9,14 +9,14 @@ module main
 fn test_generated_counter_reacts() {
 	mut c := Counter{}
 	dom := c.view() // the generated view(): clone skeleton + wire reactive slots
-	assert dom.html().contains('<h1>0</h1>')
-	assert dom.html().contains('double <span>0</span>') // doubled = 0
+	assert dom.html().contains('>0</h1>') // every element carries the scope attribute
+	assert dom.html().contains('>0</span>') // doubled = 0
 
 	c.inc() // exactly what the @click="inc" handler runs
-	assert dom.html().contains('<h1>1</h1>')
-	assert dom.html().contains('<span>2</span>') // doubled recomputed reactively
+	assert dom.html().contains('>1</h1>')
+	assert dom.html().contains('>2</span>') // doubled recomputed reactively
 
 	c.inc()
-	assert dom.html().contains('<h1>2</h1>')
-	assert dom.html().contains('<span>4</span>')
+	assert dom.html().contains('>2</h1>')
+	assert dom.html().contains('>4</span>')
 }

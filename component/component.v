@@ -17,6 +17,7 @@ import vcsr.ast
 import vcsr.parser
 import vcsr.slots
 import vcsr.bind
+import vcsr.css
 
 // --- public IR --------------------------------------------------------------
 
@@ -51,7 +52,7 @@ pub:
 	methods   []string
 	tmpl      slots.CompiledTemplate
 	bplan     bind.BindingPlan
-	style_src string // scoped CSS to embed in style()
+	style_src string // the scoped CSS (css.scope): style(), and injected by Template.instance()
 }
 
 // Generated is the emitted `name.gen.v` file.
@@ -85,7 +86,25 @@ pub fn analyze(input AnalyzeInput) !Component {
 	mut children := []string{}
 	collect_children(tree.root, mut children)
 
-	tmpl := slots.compile(tree)!
+	// styles are scoped by attribute: every skeleton element carries the
+	// component's scope attribute and every rule's last compound requires it
+	// (css.scope). Rules naming a class the template never uses are dropped,
+	// unless a `:class` binding can produce any class at run time.
+	has_css := input.css.trim_space() != ''
+	mut style := ''
+	if has_css {
+		mut used := []string{}
+		dynamic := collect_classes(tree.root, mut used)
+		scoped := if dynamic {
+			css.scope(name, input.css) or { return error('${name}.css: ${err.msg()}') }
+		} else {
+			css.scope(name, input.css, used_classes: used) or {
+				return error('${name}.css: ${err.msg()}')
+			}
+		}
+		style = scoped.css
+	}
+	tmpl := slots.compile(tree, scope_attr: if has_css { css.scope_attr(name) } else { '' })!
 	bplan := bind.plan(tmpl)!
 
 	comp := Component{
@@ -95,7 +114,7 @@ pub fn analyze(input AnalyzeInput) !Component {
 		methods:   methods
 		tmpl:      tmpl
 		bplan:     bplan
-		style_src: scope_css(name, input.css)
+		style_src: style
 	}
 	comp.check_node(tree.root, []string{})!
 	return comp
@@ -235,6 +254,10 @@ pub fn (c &Component) codegen() !Generated {
 		b.write_string(' },\n')
 	}
 	b.write_string('\t]\n')
+	if c.style_src != '' {
+		// injected once per component by instance() (host_add_style on wasm)
+		b.write_string("\tcss:   '${esc(c.style_src)}'\n")
+	}
 	b.write_string('}\n\n')
 
 	// per-slot helpers: TOP-LEVEL fns (closure-free, so they run on wasm — see
@@ -291,6 +314,12 @@ fn (c &Component) emit_bind(mut b strings.Builder, recv string, i int, s slots.S
 		.list {
 			b.write_string('\truntime.bind_list_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get)\n')
 		}
+		.toggle {
+			b.write_string('\truntime.bind_toggle_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get)\n')
+		}
+		.classes {
+			b.write_string('\truntime.bind_classes_ctx(mut ins, ${i}, ${ctx}, ${lower}_slot${i}_get)\n')
+		}
 	}
 }
 
@@ -332,6 +361,14 @@ fn (c &Component) emit_slot_helper(mut b strings.Builder, i int, s slots.SlotDes
 		.list {
 			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) int {\n${cast}')
 			b.write_string('\treturn ${c.list_count(s.source_expr)}\n}\n\n')
+		}
+		.toggle {
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) bool {\n${cast}')
+			b.write_string('\treturn ${c.qualify(s.expr, true)}\n}\n\n')
+		}
+		.classes {
+			b.write_string('fn ${lower}_slot${i}_get(ctxp voidptr) string {\n${cast}')
+			b.write_string('\treturn runtime.to_str(${c.qualify(s.expr, true)})\n}\n\n')
 		}
 	}
 }
@@ -638,61 +675,28 @@ fn parse_methods(src string, struct_name string) []string {
 	return out
 }
 
-// --- CSS scoping (a minimal pass; phase 05 does the full scope+atomize) ------
-
-// scope_css appends a component-unique suffix to each top-level class selector
-// so two components' `.box` can't collide. This is the phase-04 placeholder;
-// phase 05's `css` module supersedes it with atomization and tree-shaking.
-fn scope_css(name string, css string) string {
-	if css.trim_space() == '' {
-		return ''
-	}
-	suffix := '_' + scope_token(name)
-	mut out := ''
-	mut depth := 0
-	mut i := 0
-	for i < css.len {
-		ch := css[i]
-		if ch == `{` {
-			depth++
-			out += '{'
-			i++
-			continue
-		}
-		if ch == `}` {
-			if depth > 0 {
-				depth--
-			}
-			out += '}'
-			i++
-			continue
-		}
-		if depth == 0 && ch == `.` && i + 1 < css.len && bind.is_ident_start(css[i + 1]) {
-			out += '.'
-			i++
-			start := i
-			for i < css.len && (bind.is_ident_part(css[i]) || css[i] == `-`) {
-				i++
-			}
-			out += css[start..i] + suffix
-			continue
-		}
-		out += css[i..i + 1]
-		i++
-	}
-	return out
-}
-
-// scope_token derives a short, deterministic, name-unique suffix (FNV-1a hex).
-fn scope_token(name string) string {
-	mut h := u32(2166136261)
-	for ch in name {
-		h = (h ^ u32(ch)) * u32(16777619)
-	}
-	return h.hex()
-}
-
 // --- small helpers ----------------------------------------------------------
+
+// collect_classes gathers the class names a template's elements can carry: the
+// static `class` attributes and the `class:name` bindings. It reports whether a
+// `:class` binding makes the set dynamic (then nothing can be tree-shaken).
+fn collect_classes(node ast.Node, mut out []string) bool {
+	mut dynamic := node.attr_bindings.any(it.name.to_lower() == 'class')
+	for a in node.attrs {
+		if a.name.to_lower() == 'class' {
+			out << a.value.fields()
+		}
+	}
+	for cb in node.class_bindings {
+		out << cb.name
+	}
+	for child in node.children {
+		if collect_classes(child, mut out) {
+			dynamic = true
+		}
+	}
+	return dynamic
+}
 
 fn collect_children(node ast.Node, mut out []string) {
 	if node.kind == .component && node.tag !in out {
@@ -711,6 +715,8 @@ fn slot_kind_name(k slots.SlotKind) string {
 		.bind { 'bind' }
 		.cond { 'cond' }
 		.list { 'list' }
+		.toggle { 'toggle' }
+		.classes { 'classes' }
 	}
 }
 
